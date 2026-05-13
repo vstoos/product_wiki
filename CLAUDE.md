@@ -66,9 +66,31 @@ Inside each agency dir: one file per document (`*.pdf` or `*.html`), the same st
 - **Cache aggressively, refetch never.** Most agencies throttle. Honour file-already-on-disk; only re-download when the user explicitly says force-refresh.
 - **Don't conflate brand and INN.** `Erleada` is the brand of `apalutamide`; resolve through INN first, then fall back to brand on agency endpoints that index either.
 
-## Model-cost preference
+## Model selection (read every session)
 
-The user prefers the cheapest model that gets the job done — Haiku by default, free-tier Gemma (Gemini API + OpenRouter round-robin) for OCR and image captions, local LLMs via RTX 3090 (Qwen3.6-27b-Q4K_M) as future option. The skills already reflect this: `pdf-doc-extraction` defaults to "Gemma multi-provider" (free) and only escalates to Azure DI when the user accepts paid cost. When you have agency over model selection inside a skill, mirror that bias: pick free / Haiku / local first, escalate only on quality failure or explicit user ask.
+Use the cheapest / fastest model that gets the job done.
+
+- **Default text inference** (page classification, engine routing, caption-or-skip decisions): **Haiku**.
+- **OCR / vision captions:** Gemini API round-robin on Gemma 4 models (free tier). Local 2B-class models on RTX 3090 are the planned swap-in — same skill, different `--engine` flag.
+- **Heavy synthesis** (Tier 2 wiki narratives only): Sonnet sparingly. Never Opus by default.
+- **Escalate** only after the cheap path produces clearly wrong output twice, or on explicit user ask.
+
+Each skill's `SKILL.md` carries its own model-selection block at the top — when you invoke a skill, that block is the local-source-of-truth and overrides this default.
+
+## Skill structure (the pattern)
+
+Each skill is a self-contained folder:
+
+```
+skills/<skill-name>/
+├── SKILL.md           # model-agnostic prose contract, model-selection block at top
+├── README.md          # install + invocation
+├── requirements.txt   # system Python deps (no in-repo venv)
+├── references/        # deep docs loaded only when needed
+└── scripts/           # small CLI tools the agent invokes via Bash
+```
+
+Tools are language-agnostic in principle (Python first because of the PDF/vision ecosystem; a future skill might wrap a Rust or C binary, like `be-sample-size` does). What matters is they're invokable as plain CLI commands and emit JSON to stdout / files to disk — so any agent (Claude, Hermes, Pi) can use them, not just Claude Code.
 
 ## What this repo is NOT for
 
