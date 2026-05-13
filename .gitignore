@@ -1,0 +1,21 @@
+# Test datasets (per-substance regulatory-doc caches + extractions)
+# Add new substance dirs here as they are introduced.
+/apalutamide/
+
+# Wiki outputs (vault artifacts; built from sources, not source-of-truth)
+/wiki/
+/wiki_preview/
+*-merged/
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+desktop.ini
+*~
+.vscode/
+.idea/
+
+# Local-only env / secrets
+.env
+.env.*
+!.env.example
