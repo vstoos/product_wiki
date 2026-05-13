@@ -1,225 +1,115 @@
 ---
 name: pdf-doc-extraction
-description: Use when the user has one or more downloaded regulatory PDF documents (FDA reviews, EMA EPARs, HC Product Monographs, PMDA review reports, TGA AusPARs, PubMed PMC full-texts) and needs them converted into LLM-friendly markdown with structured text, embedded HTML tables, extracted figures/images, OCR'd scanned regions, and optional vision-model captions for plots/charts/diagrams. The output is `<stem>.hybrid.md` + a `<stem>.assets/` directory of figure PNGs, ready for downstream wiki extraction or human review. Trigger phrases include "extract text from this PDF", "convert these reviews to markdown", "OCR the scanned pages", "extract figures and tables from this EPAR", "process all PDFs in <dir>", "get structured content from this AusPAR".
+description: Use when the user has one or more downloaded regulatory PDF documents (FDA reviews, EMA EPARs, HC Product Monographs, PMDA review reports, TGA AusPARs, PubMed PMC full-texts) and needs them converted into LLM-friendly markdown with structured text, embedded HTML tables, extracted figures/images, OCR'd scanned regions, and optional vision-model captions for plots/charts/diagrams. Triggers include "extract text from this PDF", "convert these reviews to markdown", "OCR the scanned pages", "extract figures and tables from this EPAR", "process all PDFs in <dir>".
 ---
 
 # PDF Document Extraction
 
-You are operating as the PDF → structured-markdown tier of the `get_reports` pipeline. The Python implementation lives in `pdf_extraction/` and orchestrates a multi-stage hybrid pipeline. This skill describes what each stage produces, when to invoke OCR vs. fast text extraction, when to use vision-model captioning, and how to assemble the final `.hybrid.md` output.
+Agent-friendly CLI tools for converting regulatory PDFs into structured markdown + asset folders. Each tool is a small Python script invoked via Bash; outputs are files on disk plus a JSON summary on stdout.
 
-## What you produce per input PDF
+## Model selection (read this first)
 
-For each input `<stem>.pdf`:
+Use the cheapest / fastest model that gets the job done. Defaults:
+
+| Decision | Default model | Escalate to | Never use by default |
+|---|---|---|---|
+| Per-page text vs OCR routing, engine choice, caption-or-skip | **Haiku** | Sonnet only after Haiku gives clearly wrong output twice | Opus |
+| OCR of scanned pages | **Gemini API round-robin on Gemma 4 models (free tier)**; planned local 2B models in future | Gemma 27B/31B if 4B output is unusable | Paid OCR (Azure DI) — only on explicit user request |
+| Vision captions for figures | **Gemini API round-robin on Gemma 4 models (free tier)** | Sonnet vision sparingly | Opus vision |
+| Heavy synthesis (NOT this skill — wiki only) | n/a | n/a | n/a |
+
+Local-LLM swap-in (RTX 3090, future): change the OCR/caption tool's `--engine` flag; SKILL.md and orchestration stay identical.
+
+## What this skill produces per input PDF
 
 ```
-<stem>.hybrid.md              # Primary output: markdown with per-page anchors, inline tables, embedded figures
-<stem>.assets/                # Figure / image rasters extracted from the PDF
-  ├── figure_p3_f01.png       # caption-anchored figure
-  ├── figure_p23_f01.png
-  ├── table_p5_t01.png        # (optional) table-as-image when HTML rendering is preferred only as fallback
-  └── ...
-<stem>.assets/ir.json         # (optional) structural IR — block types, bboxes, reading order
-<stem>.hybrid.json            # (optional) JSON twin of the markdown for programmatic consumers
-<stem>.meta.json              # extraction metadata: pages, scanned-page count, engines used, cost
-<stem>.native.txt             # (optional) raw PyMuPDF text dump (useful for diff)
+<stem>.md                  # YAML frontmatter + per-page text + (planned) inline tables, figures
+<stem>.extract.json        # extraction metadata: pages, problem_pages, engines used, timing
+<stem>.assets/             # (planned) figure / image rasters extracted from the PDF
+  ├── figure_p1_f1.png
+  ├── figure_p23_f1.png
+  └── ir.json              # (planned) structural IR
 ```
 
-The primary output is the `.hybrid.md`. Downstream consumers (`wiki-pharma-extraction` skill, synthesis pipeline, Streamlit document review) all read it.
+The shape on disk follows the convention already established by upstream extractions in this repo (YAML frontmatter, `<!-- page: N -->` markers between pages, plain `>` blockquote captions adjacent to figure references). This is a description of what the tools produce, not a strict format the wiki agent must parse — the wiki agent is an LLM and reads either anchor convention.
 
-### `.hybrid.md` shape
+## Tools available (Phase 1)
 
-```markdown
-<!-- doc_meta: pages=259, scanned_pages=38, engines=pymupdf+gemma_ocr+slanext -->
+| Tool | Status | What it does |
+|---|---|---|
+| `scripts/extract_text.py` | shipped | PyMuPDF text extraction → `<stem>.md` + `<stem>.extract.json`. Flags problem pages (text < 100 chars) for a later OCR pass. |
+| `scripts/ocr_page.py` | planned | Gemma OCR for problem pages. Free-tier round-robin between Gemini API and OpenRouter. |
+| `scripts/extract_figures.py` | planned | Raster + vector figures into `<stem>.assets/`. |
+| `scripts/caption_figure.py` | planned | Vision-model caption per figure. Free-tier Gemma 4. |
+| `scripts/assemble_md.py` | planned | Stitch text + OCR + figures + captions into the final `<stem>.md`. |
 
-<a id="p1"></a>
-## Page 1
-
-CENTER FOR DRUG EVALUATION AND RESEARCH
-
-APPLICATION NUMBER: 210951Orig1s000
-
-MULTIDISCIPLINE REVIEW
-
-<a id="p2"></a>
-## Page 2
-
-(text content...)
-
-### Figure 1 — molecular structure of apalutamide
-
-![Figure 1 — molecular structure of apalutamide](210951Orig1s000MultidisciplineR.assets/figure_p2_f01.png)
-
-> *Caption*: 2D chemical structure showing the diaryl-thiohydantoin core, bromine substituent, and the cyano-pyridinyl moiety characteristic of apalutamide. Vision-model annotation.
-
-<a id="p3"></a>
-## Page 3
-
-(text content...)
-
-### Table 1 — Drug substance specifications
-
-<table>
-  <thead><tr><th>Parameter</th><th>Method</th><th>Specification</th></tr></thead>
-  <tbody>
-    <tr><td>Appearance</td><td>Visual</td><td>White to off-white powder</td></tr>
-    <tr><td>Identification</td><td>IR</td><td>Conforms to reference</td></tr>
-    ...
-  </tbody>
-</table>
-```
-
-Key conventions:
-- **Per-page anchors** `<a id="pN"></a>` immediately precede each page heading. Downstream extraction uses these to attribute source.page.
-- **Inline HTML tables** for structured tabular data (preferable to markdown pipe-tables for nested headers, rowspans).
-- **Figure references** use markdown image syntax pointing at `<stem>.assets/figure_pN_fM.png`.
-- **Figure captions** are appended as `> *Caption*: ...` after the image (when generated by a vision model).
-- **Scanned regions** that were OCR'd get inlined as normal text. The reader should NOT be able to tell from the markdown alone whether a page was OCR'd.
+See `README.md` for invocation; see `references/` for engine-comparison details.
 
 ## When to use this skill
 
-Use it when you have PDFs that need:
-- Text extraction beyond what `pdftotext` produces (i.e. text + tables + figures + scanned pages all together)
-- Structural IR for downstream programmatic use
-- Figure captioning by a vision model for plot/chart understanding
-- Re-extraction with different engine choices (Azure DI vs PaddleOCR-VL vs Gemma vs Surya vs Docker-remote)
+- Newly fetched PDFs from `reg-doc-fetching` need to become structured markdown
+- Existing PDFs in `<substance>/<AGENCY>/` lack a sibling `<stem>.md` extraction
+- An existing extraction was produced by a different engine (e.g. Azure DI) and the user wants a free-tier re-extraction
 
 Do NOT use this skill for:
-- Single-document text dump → `pdftotext` from poppler is fine
-- HTML pages → those should be saved as `.html` by the fetching skill; if you need text from them, use `BeautifulSoup`
-- Wiki/synthesis work → that's the downstream skills' job
+- Fetching documents — that's `reg-doc-fetching`
+- Wiki / fact extraction — that's `wiki-pharma-extraction`
+- Single-doc text dump — `pdftotext` is fine
 
-## Setup before running
+## Setup
 
-1. Read `references/pipeline-stages.md` — the 4-stage HybridPipeline (text → OCR → tables → figures+captions).
-2. Read `references/engine-selection.md` — when to choose which OCR engine (Gemma vs PaddleOCR-VL vs Surya vs Azure DI vs remote Docker).
-3. Read `references/figure-extraction.md` — when to caption a figure and when to skip it.
-4. Read `references/output-format.md` — the exact `.hybrid.md` markdown conventions.
+```bash
+pip install -r skills/pdf-doc-extraction/requirements.txt
+```
 
-Then ask the user:
-- **Input** — single PDF path, or directory of PDFs
-- **OCR engine preference** — default to `Gemma multi-provider` (free Gemini API + OpenRouter round-robin); user can override
-- **Caption mode** — `all-figures` | `flagged-only` (default: figures whose extracted-text density is below 50 chars are auto-captioned)
-- **Force reprocess** — if `.hybrid.md` already exists, skip unless user says force
+System Python is fine; no in-repo venv. See `README.md` for details.
 
-## The 4-stage HybridPipeline
+## How to invoke (Phase 1 only)
 
-Each input PDF goes through these stages in order. Each stage may skip its own work if a cache hit exists.
+```bash
+python skills/pdf-doc-extraction/scripts/extract_text.py \
+  --pdf <substance>/<AGENCY>/<file>.pdf \
+  --out <substance>/<AGENCY>/
+```
 
-### Stage 1 — PyMuPDF text + structure pass
-
-**What:** open the PDF, page-by-page. Extract:
-- Text per page (PyMuPDF's `page.get_text()`)
-- Block bboxes + reading order
-- Embedded raster images (`page.get_images()`)
-- Vector graphics (chart shapes, lines, polygons — not extracted as images here, but detected as candidates for Stage 4)
-
-**Output:**
-- Per-page text + block metadata
-- List of "problem pages" — pages where text extraction failed or returned near-empty (likely scanned)
-- List of "table candidates" — pages with detected table structure (large bordered regions, multi-column layouts)
-- List of "figure candidates" — embedded raster images, plus vector-graphic regions
-
-**Decision:** if a page has >100 chars of clean text and no problem indicators → its content goes straight to the final `.hybrid.md` without OCR.
-
-### Stage 2 — OCR pass for problem pages
-
-For each problem page identified in Stage 1, run an OCR engine (see `engine-selection.md` for which).
-
-**Engines:**
-- **Gemma multi-provider** (default) — Gemini API + OpenRouter round-robin, ~$0.00 on free tier, ~13s/page
-- **PaddleOCR-VL** — GPU, 0.9B vision-language model, best for FDA documents, ~2s/page on GPU
-- **Surya** — CPU, slow but reliable, ~30s/page on CPU
-- **Azure Document Intelligence** — cloud, ~2.8s/page, $10/1000 pages, returns markdown+HTML directly
-- **Remote Docker OCR** — LightOnOCR-2-1B (port 8001), GLM-OCR, Surya (port 8002) — fast GPU via HTTP
-
-**Output:** per-page text from OCR, structured to integrate with Stage 1 text.
-
-**Stage 2 sub-step (Stage 2b):** if a page contains a table that the OCR pass detected but didn't fully structure, route to SLANeXt table extractor (Stage 3).
-
-### Stage 3 — Table extraction
-
-For tables detected on text pages (Stage 1) or OCR'd pages (Stage 2):
-
-- **SLANeXt** (`pdf_table_slanext.py`) — table structure recognition model, outputs HTML.
-- **Azure DI** — if used for Stage 2, tables are already structured in its markdown output; skip SLANeXt.
-
-Each detected table → an HTML `<table>` block inlined in the markdown at the table's reading-order position. Optionally save a `.assets/table_pN_tM.png` raster as fallback.
-
-### Stage 4 — Figure extraction + captioning
-
-For figure candidates from Stage 1:
-
-1. **Raster extract** — for embedded raster images: save directly from PyMuPDF `page.get_images()` + image_writer.
-2. **Vector rasterize** — for vector regions (charts, diagrams): use a layout detector (Surya layout, PaddleX layout) to identify FIGURE bboxes, then rasterize the bbox via PyMuPDF `page.get_pixmap(clip=bbox)`.
-3. **Caption candidate** — within ±200 chars of the figure's reading-order position, look for "Figure N", "Fig. N", "Figure N.X" etc. Capture the caption text; place after the image in `.hybrid.md`.
-4. **Vision model annotation** (optional) — if the user wants captions, OR the figure has weak/no inline caption, OR the figure is identified as a chart/plot, send the image + surrounding context to a vision model and append the response as `> *Caption*: ...`.
-
-See `references/figure-extraction.md` for the caption-vs-skip decision tree.
-
-## Engine selection guidance (one-liner)
-
-| Document type | Default engine | Why |
-|---|---|---|
-| FDA review (recent) | Gemma multi-provider | Recent FDA docs are mostly clean text PDFs; Gemma handles cleanly with $0 cost |
-| FDA review (pre-2010 scanned) | PaddleOCR-VL or remote Docker | Older FDA scans are noisy; need OCR-specialised model |
-| EMA EPAR | Gemma multi-provider | Generally clean PDFs, EU origin |
-| HC Product Monograph | Gemma multi-provider | Bilingual (EN/FR) content handled OK |
-| PMDA review report | PaddleOCR-VL or Azure DI | Often scanned; some include Japanese-origin tables |
-| TGA AusPAR | Gemma multi-provider | Clean PDFs |
-| PubMed PMC full-text | PyMuPDF text-only (skip OCR) | Already clean text, no benefit from OCR |
-| Anything with scanned regions identified | OCR engine (any) | PyMuPDF returns empty text on scanned pages |
-
-The user can always override per-doc. Default: auto-select per these heuristics.
+Reads the PDF, writes `<stem>.md` and `<stem>.extract.json` next to it. Emits a JSON summary on stdout. Never modifies the input.
 
 ## Hard constraints
 
-- **Always inject `<a id="pN"></a>` anchors.** Downstream wiki extraction depends on these for page references. If you don't write them, source citations break.
-- **Preserve EMA PSG checkboxes literally.** Symbols `☒` (U+2612) and `☐` (U+2610) appear in fasting/fed and BCS-class tables. NEVER convert to `true/false`.
-- **Don't paraphrase or "fix" OCR output.** If a page reads garbled, leave it garbled — downstream verifiers handle quality. Editing introduces silent data corruption.
-- **Don't merge cross-page tables yourself.** If a table spans pages, emit two table fragments tagged in their respective pages. Cross-page merge is a downstream concern (specifically PaddleOCR-VL 1.5 promises this, see `references/engine-selection.md`).
-- **Always emit retrieval-evidence sidecar.** Even if the original `.meta.json` from fetching exists, augment it with extraction metadata: `extracted_at`, `engines_used`, `pages_processed`, `scanned_pages`, `figures_extracted`, `cost_estimate`.
-- **Don't OCR pages with clean PyMuPDF text.** It wastes time and risks degrading clean text with OCR errors. Only OCR identified problem pages.
-- **Embedded figures use the canonical naming.** `<stem>.assets/figure_p<page>_f<index>.png`. The wiki extraction skill uses this pattern to locate assets when constructing source cards.
+- **Don't paraphrase or "fix" extracted text.** If a page reads garbled, leave it garbled — downstream verifiers handle quality. Editing introduces silent data corruption.
+- **Don't OCR pages with clean PyMuPDF text.** Wastes compute and risks degrading clean text with OCR errors. Only OCR pages flagged `is_problem: true` in the JSON sidecar.
+- **Don't merge cross-page tables.** Emit table fragments tagged in their respective pages; cross-page merge is a downstream concern.
+- **Always write the `.extract.json` sidecar.** Even minimal metadata is the audit trail — engines used, processing time, problem-page count.
+- **Never modify the input PDF.** All outputs go in the same directory or a user-specified out dir.
 
 ## Output report format
 
-After processing, emit:
+After processing one or more PDFs, emit:
 
 ```
 ## PDF extraction summary
 
-### Per-document results
-- 210951Orig1s000MultidisciplineR.pdf — 259 pages, 38 scanned, 7 figures, 12 tables — extracted in 8m 34s
-- 210951Orig1s000ChemR.pdf — 51 pages, 13 scanned, 4 figures, 8 tables — extracted in 2m 18s
-- Erleada_-_..._Public_assessment_report.pdf — 198 pages, 0 scanned (clean), 14 figures, 26 tables — extracted in 1m 12s
-- ...
-
-### Aggregates
-- Total documents: N processed (M skipped due to existing .hybrid.md)
-- Total pages: P
-- OCR pages: O (M% of total)
-- Figures extracted: F
-- Tables extracted: T
-- Engines used: <list>
-- Total time: H:MM:SS
-- Cost estimate: $X.XX (Gemma free or paid; Azure DI if applicable)
+- Document: <stem>.pdf — N pages (M problem pages flagged for OCR), processed in T seconds
+- Output: <stem>.md (S kB), <stem>.extract.json
+- Engine: pymupdf (vN.N.N)
 ```
+
+For a directory batch, list one line per file plus aggregate counts at the end.
 
 ## What NOT to do
 
-- Don't run OCR on every page — only the problem pages from Stage 1.
-- Don't merge cross-page tables in this skill; emit fragments.
-- Don't generate captions for trivial figures (logos, headers, decorations). See `figure-extraction.md` §SkipHeuristics.
-- Don't write text content outside the `.hybrid.md`. All extracted artifacts go in either the markdown body or `.assets/`.
-- Don't post-process `.hybrid.md` to "improve" it. The output should be reproducible — running the same engine on the same PDF should produce the same markdown.
-- Don't store binary blobs in `.hybrid.md`. Images go in `.assets/` and are referenced by path.
+- Don't run OCR on every page — only the problem pages from the text pass.
+- Don't post-process `.md` to "improve" it. Output should be reproducible.
+- Don't store binary blobs in `.md`. Images go in `<stem>.assets/` (in later phases).
+- Don't bypass the JSON sidecar — it's the audit anchor for which engine produced what.
 
 ## Resources
 
-- `references/pipeline-stages.md` — 4-stage HybridPipeline detail
-- `references/engine-selection.md` — full OCR engine comparison + decision tree
-- `references/figure-extraction.md` — when to caption vs skip; vision-model prompting
-- `references/output-format.md` — `.hybrid.md` markdown conventions, asset naming
-- `references/normalization.md` — post-extraction normalization (page anchors, table HTML, figure embeds)
+- `README.md` — install and invocation
+- `references/pipeline-stages.md` — full pipeline plan (text → OCR → tables → figures+captions)
+- `references/engine-selection.md` — OCR engine comparison + decision tree
+- `references/figure-extraction.md` — caption-vs-skip rules; vision-model prompting
+- `references/output-format.md` — `.md` conventions, asset naming
+- `references/normalization.md` — post-extraction normalization
 
-The Python implementation (read-only cross-reference): `pdf_extraction/pdf_hybrid_pipeline.py`, `pdf_extraction/pdf_extractor_pymupdf.py`, `pdf_extraction/pdf_ocr_paddlevl.py`, `pdf_extraction/pdf_ocr_gemma.py`, `pdf_extraction/pdf_ocr_surya.py`, `pdf_extraction/pdf_ocr_azuredi.py`, `pdf_extraction/pdf_ocr_remote.py`, `pdf_extraction/pdf_table_slanext.py`, `pdf_extraction/pdf_layout_classifier.py`, `pdf_extraction/pdf_render_cache.py`.
+References describe the full target pipeline. The shipped tools cover only a subset; the table above is the source of truth for what's actually available today.
