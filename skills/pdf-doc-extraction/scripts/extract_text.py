@@ -19,13 +19,6 @@ from typing import Any
 
 import fitz  # PyMuPDF
 
-# Ensure this module is registered in sys.modules for dataclass compatibility
-_this_module = sys.modules.get(__name__)
-if _this_module is None:
-    import types
-    _this_module = types.ModuleType(__name__)
-    sys.modules[__name__] = _this_module
-
 ENGINE_NAME = "pymupdf"
 PROBLEM_PAGE_CHAR_THRESHOLD = 100  # below this, page is flagged for downstream OCR
 
@@ -82,7 +75,7 @@ def extract(pdf_path: Path) -> dict[str, Any]:
         "source_file": pdf_path.name,
         "page_count": len(pages),
         "engine": ENGINE_NAME,
-        "engine_version": fitz.__doc__.splitlines()[0] if fitz.__doc__ else "unknown",
+        "engine_version": getattr(fitz, "__version__", "unknown"),
         "problem_page_count": len(problem_pages),
         "problem_pages": problem_pages,
         "extraction_seconds": round(elapsed, 3),
@@ -95,12 +88,12 @@ def render_markdown(result: dict[str, Any]) -> str:
     md = result["metadata"]
     lines = [
         "---",
-        f'source_file: "{md["source_file"]}"',
-        f'page_count: {md["page_count"]}',
-        f'engine: "{md["engine"]}"',
-        f'engine_version: "{md["engine_version"]}"',
-        f'problem_page_count: {md["problem_page_count"]}',
-        f'extraction_seconds: {md["extraction_seconds"]}',
+        f"source_file: {json.dumps(md['source_file'])}",
+        f"page_count: {md['page_count']}",
+        f"engine: {json.dumps(md['engine'])}",
+        f"engine_version: {json.dumps(md['engine_version'])}",
+        f"problem_page_count: {md['problem_page_count']}",
+        f"extraction_seconds: {md['extraction_seconds']}",
         "---",
     ]
     for page in result["pages"]:

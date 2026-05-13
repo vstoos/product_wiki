@@ -1,6 +1,7 @@
 """Tests for extract_text.py — PyMuPDF text extraction tool."""
 import importlib.util
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,7 @@ if _spec is None or _spec.loader is None:
         "Task 3 must create it before these tests can pass."
     )
 extract_text = importlib.util.module_from_spec(_spec)
+sys.modules["extract_text"] = extract_text  # required for dataclass module lookup
 _spec.loader.exec_module(extract_text)
 
 
