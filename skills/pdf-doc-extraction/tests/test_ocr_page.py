@@ -137,3 +137,47 @@ def test_transcribe_lmstudio_propagates_http_error():
             ocr_page.transcribe_lmstudio(
                 b"\x89PNG", host="http://localhost:1234", model="m", timeout=60
             )
+
+
+def test_process_pages_records_per_page_errors(suppl11_pdf):
+    call_count = {"n": 0}
+
+    def fake_transcribe(image_bytes, *, host, model, timeout):
+        call_count["n"] += 1
+        if call_count["n"] == 2:
+            raise RuntimeError("backend exploded")
+        return f"page-text-{call_count['n']}"
+
+    with patch.object(ocr_page, "transcribe_lmstudio", side_effect=fake_transcribe):
+        results = ocr_page.process_pages(
+            pdf_path=suppl11_pdf,
+            page_numbers=[1, 2, 3],
+            dpi=100,
+            host="http://localhost:1234",
+            model="m",
+            timeout=60,
+        )
+
+    assert [r["page_number"] for r in results] == [1, 2, 3]
+    assert results[0]["status"] == "ok"
+    assert results[0]["text"] == "page-text-1"
+    assert results[1]["status"] == "error"
+    assert "backend exploded" in results[1]["error"]
+    assert results[1]["text"] == ""
+    assert results[2]["status"] == "ok"
+    assert results[2]["text"] == "page-text-3"
+    for r in results:
+        assert "duration_sec" in r
+        assert "char_count" in r
+
+
+def test_process_pages_empty_list_returns_empty():
+    results = ocr_page.process_pages(
+        pdf_path=Path("nonexistent.pdf"),
+        page_numbers=[],
+        dpi=100,
+        host="x",
+        model="x",
+        timeout=1,
+    )
+    assert results == []

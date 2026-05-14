@@ -13,6 +13,7 @@ from __future__ import annotations
 import base64
 import json
 import sys
+import time
 import urllib.request
 from pathlib import Path
 
@@ -133,3 +134,44 @@ def transcribe_lmstudio(
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         body = json.loads(resp.read())
     return body["choices"][0]["message"]["content"].strip()
+
+
+def process_pages(
+    *,
+    pdf_path: Path,
+    page_numbers: list[int],
+    dpi: int,
+    host: str,
+    model: str,
+    timeout: int,
+) -> list[dict]:
+    """Render and transcribe each page. Per-page errors are recorded, not raised.
+
+    Returns one dict per requested page, in input order:
+      {page_number, text, char_count, duration_sec, status, [error]}
+    """
+    results: list[dict] = []
+    for pn in page_numbers:
+        t0 = time.monotonic()
+        try:
+            png = render_page_png(pdf_path, page_number=pn, dpi=dpi)
+            text = transcribe_lmstudio(
+                png, host=host, model=model, timeout=timeout
+            )
+            results.append({
+                "page_number": pn,
+                "text": text,
+                "char_count": len(text),
+                "duration_sec": round(time.monotonic() - t0, 3),
+                "status": "ok",
+            })
+        except Exception as e:  # noqa: BLE001 - per-page containment is the point
+            results.append({
+                "page_number": pn,
+                "text": "",
+                "char_count": 0,
+                "duration_sec": round(time.monotonic() - t0, 3),
+                "status": "error",
+                "error": f"{type(e).__name__}: {e}",
+            })
+    return results
