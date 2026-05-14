@@ -14,7 +14,7 @@ Use the cheapest / fastest model that gets the job done. Defaults:
 | Decision | Default model | Escalate to | Never use by default |
 |---|---|---|---|
 | Per-page text vs OCR routing, engine choice, caption-or-skip | **Haiku** | Sonnet only after Haiku gives clearly wrong output twice | Opus |
-| OCR of scanned pages | **Gemini API round-robin on Gemma 4 models (free tier)**; planned local 2B models in future | Gemma 27B/31B if 4B output is unusable | Paid OCR (Azure DI) — only on explicit user request |
+| OCR of scanned pages | **`glm-ocr` via LMStudio (≈2B, OCR-specialized, >150 tps on RTX 3090)** | `gemma-4-e2b-it` (2B general vision) or `gemma-4-e4b-it` (4B) after `glm-ocr` produces clearly wrong output twice. Gemini API round-robin is planned for Phase 2b. | PaddleOCR (Windows hell); paid OCR (Azure DI) only on explicit user request |
 | Vision captions for figures | **Gemini API round-robin on Gemma 4 models (free tier)** | Sonnet vision sparingly | Opus vision |
 | Heavy synthesis (NOT this skill — wiki only) | n/a | n/a | n/a |
 
@@ -33,12 +33,12 @@ Local-LLM swap-in (RTX 3090, future): change the OCR/caption tool's `--engine` f
 
 The shape on disk follows the convention already established by upstream extractions in this repo (YAML frontmatter, `<!-- page: N -->` markers between pages, plain `>` blockquote captions adjacent to figure references). This is a description of what the tools produce, not a strict format the wiki agent must parse — the wiki agent is an LLM and reads either anchor convention.
 
-## Tools available (Phase 1)
+## Tools available
 
 | Tool | Status | What it does |
 |---|---|---|
 | `scripts/extract_text.py` | shipped | PyMuPDF text extraction → `<stem>.md` + `<stem>.extract.json`. Flags problem pages (text < 100 chars) for a later OCR pass. |
-| `scripts/ocr_page.py` | planned | Gemma OCR for problem pages. Free-tier round-robin between Gemini API and OpenRouter. |
+| `scripts/ocr_page.py` | shipped | LMStudio OCR for problem pages. Reads Phase 1's `<stem>.extract.json`, transcribes flagged pages, writes `<stem>.ocr.json`. Gemini API round-robin is Phase 2b. |
 | `scripts/extract_figures.py` | planned | Raster + vector figures into `<stem>.assets/`. |
 | `scripts/caption_figure.py` | planned | Vision-model caption per figure. Free-tier Gemma 4. |
 | `scripts/assemble_md.py` | planned | Stitch text + OCR + figures + captions into the final `<stem>.md`. |
@@ -64,7 +64,9 @@ pip install -r skills/pdf-doc-extraction/requirements.txt
 
 System Python is fine; no in-repo venv. See `README.md` for details.
 
-## How to invoke (Phase 1 only)
+## How to invoke
+
+### Text extraction (Phase 1)
 
 ```bash
 python skills/pdf-doc-extraction/scripts/extract_text.py \
@@ -72,7 +74,24 @@ python skills/pdf-doc-extraction/scripts/extract_text.py \
   --out <substance>/<AGENCY>/
 ```
 
-Reads the PDF, writes `<stem>.md` and `<stem>.extract.json` next to it. Emits a JSON summary on stdout. Never modifies the input.
+Writes `<stem>.md` and `<stem>.extract.json` next to the PDF.
+
+### OCR pass (Phase 2)
+
+Requires LMStudio running locally with a vision-capable model loaded
+(default: `glm-ocr`). Start LMStudio's local server on port 1234
+before invoking.
+
+```bash
+python skills/pdf-doc-extraction/scripts/ocr_page.py \
+  --pdf <substance>/<AGENCY>/<file>.pdf \
+  --extract-json <substance>/<AGENCY>/<file>.extract.json \
+  --out <substance>/<AGENCY>/
+```
+
+Reads `problem_pages` from the extract sidecar, transcribes each, writes
+`<stem>.ocr.json`. Override which pages to OCR with `--pages "3,5,7-9"`.
+Rerun is cache-aware: ok-status pages are skipped unless `--force`.
 
 ## Hard constraints
 
