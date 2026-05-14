@@ -447,3 +447,67 @@ def test_cli_records_prompt_mode_in_output(suppl11_pdf, tmp_path):
     assert rc == 0
     payload = _json.loads((tmp_path / f"{suppl11_pdf.stem}.ocr.json").read_text())
     assert payload["prompt_mode"] == "auto-empty"  # default model is glm-ocr
+
+
+# ---- Phase 2b: Gemini fallback ----
+
+
+def test_transcribe_gemini_sends_inline_data_payload():
+    captured = {}
+
+    def fake_urlopen(req, timeout=None):
+        captured["url"] = req.full_url
+        captured["body"] = _json.loads(req.data.decode("utf-8"))
+        return _MockResponse({
+            "candidates": [{"content": {"parts": [{"text": "OCR_TEXT"}]}}]
+        })
+
+    with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+        result = ocr_page.transcribe_gemini(
+            b"\x89PNG_FAKE",
+            api_key="KEY123",
+            model="gemma-3-27b-it",
+            timeout=60,
+            prompt="describe",
+        )
+    assert result == "OCR_TEXT"
+    assert "generativelanguage.googleapis.com" in captured["url"]
+    assert "gemma-3-27b-it:generateContent" in captured["url"]
+    assert "key=KEY123" in captured["url"]
+    parts = captured["body"]["contents"][0]["parts"]
+    text_parts = [p for p in parts if "text" in p]
+    inline_parts = [p for p in parts if "inline_data" in p]
+    assert len(text_parts) == 1 and text_parts[0]["text"] == "describe"
+    assert len(inline_parts) == 1
+    assert inline_parts[0]["inline_data"]["mime_type"] == "image/png"
+    assert inline_parts[0]["inline_data"]["data"]
+
+
+def test_transcribe_gemini_concatenates_multi_part_response():
+    body = {"candidates": [{"content": {"parts": [
+        {"text": "thinking..."},
+        {"text": "ACTUAL ANSWER"},
+    ]}}]}
+    with patch("urllib.request.urlopen", return_value=_MockResponse(body)):
+        result = ocr_page.transcribe_gemini(
+            b"\x89PNG", api_key="K", model="m", timeout=60, prompt="x",
+        )
+    assert "ACTUAL ANSWER" in result
+
+
+def test_transcribe_gemini_omits_text_part_when_prompt_empty():
+    captured = {}
+
+    def fake_urlopen(req, timeout=None):
+        captured["body"] = _json.loads(req.data.decode("utf-8"))
+        return _MockResponse({
+            "candidates": [{"content": {"parts": [{"text": "OUT"}]}}]
+        })
+
+    with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+        ocr_page.transcribe_gemini(
+            b"\x89PNG", api_key="K", model="m", timeout=60, prompt="",
+        )
+    parts = captured["body"]["contents"][0]["parts"]
+    types = ["text" if "text" in p else "inline_data" for p in parts]
+    assert types == ["inline_data"]

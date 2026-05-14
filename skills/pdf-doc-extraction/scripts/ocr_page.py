@@ -142,6 +142,45 @@ def transcribe_lmstudio(
     return body["choices"][0]["message"]["content"].strip()
 
 
+GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+
+
+def transcribe_gemini(
+    image_png_bytes: bytes,
+    *,
+    api_key: str,
+    model: str,
+    timeout: int,
+    prompt: str = OCR_PROMPT,
+) -> str:
+    """POST the image to Gemini's generateContent endpoint. Returns text.
+
+    One image per request. If `prompt` is empty, the request is image-only.
+    Raises HTTPError on non-2xx responses (caller handles 429 routing).
+    """
+    b64 = base64.b64encode(image_png_bytes).decode("ascii")
+    parts: list[dict] = []
+    if prompt:
+        parts.append({"text": prompt})
+    parts.append({"inline_data": {"mime_type": "image/png", "data": b64}})
+    payload = {
+        "contents": [{"parts": parts}],
+        "generationConfig": {"temperature": 0.0, "maxOutputTokens": 4096},
+    }
+    url = GEMINI_ENDPOINT.format(model=model, api_key=api_key)
+    req = urllib.request.Request(
+        url=url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        body = json.loads(resp.read())
+    out_parts = body["candidates"][0]["content"]["parts"]
+    text = "".join(p.get("text", "") for p in out_parts if "text" in p)
+    return text.strip()
+
+
 def process_pages(
     *,
     pdf_path: Path,
