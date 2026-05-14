@@ -511,3 +511,58 @@ def test_transcribe_gemini_omits_text_part_when_prompt_empty():
     parts = captured["body"]["contents"][0]["parts"]
     types = ["text" if "text" in p else "inline_data" for p in parts]
     assert types == ["inline_data"]
+
+
+def test_gemini_round_robin_advances_on_429():
+    import urllib.error
+
+    pairs_seen = []
+
+    def fake_transcribe(image, *, api_key, model, timeout, prompt):
+        pairs_seen.append((api_key, model))
+        if api_key == "K1":
+            raise urllib.error.HTTPError("u", 429, "rate limit", None, None)
+        return f"ok-from-{api_key}"
+
+    with patch.object(ocr_page, "transcribe_gemini", side_effect=fake_transcribe):
+        text = ocr_page._gemini_with_round_robin(
+            b"\x89PNG",
+            pairs=[("K1", "m1"), ("K2", "m2")],
+            timeout=60,
+            prompt="x",
+        )
+    assert text == "ok-from-K2"
+    assert pairs_seen == [("K1", "m1"), ("K2", "m2")]
+
+
+def test_gemini_round_robin_raises_when_all_pairs_429():
+    import urllib.error
+
+    def fake_transcribe(image, *, api_key, model, timeout, prompt):
+        raise urllib.error.HTTPError("u", 429, "rate limit", None, None)
+
+    with patch.object(ocr_page, "transcribe_gemini", side_effect=fake_transcribe):
+        with pytest.raises(RuntimeError) as ei:
+            ocr_page._gemini_with_round_robin(
+                b"\x89PNG",
+                pairs=[("K1", "m1"), ("K2", "m2")],
+                timeout=60,
+                prompt="x",
+            )
+    assert "all gemini" in str(ei.value).lower()
+
+
+def test_gemini_round_robin_propagates_non_429_errors():
+    import urllib.error
+
+    def fake_transcribe(image, *, api_key, model, timeout, prompt):
+        raise urllib.error.HTTPError("u", 500, "server error", None, None)
+
+    with patch.object(ocr_page, "transcribe_gemini", side_effect=fake_transcribe):
+        with pytest.raises(urllib.error.HTTPError):
+            ocr_page._gemini_with_round_robin(
+                b"\x89PNG",
+                pairs=[("K1", "m1")],
+                timeout=60,
+                prompt="x",
+            )

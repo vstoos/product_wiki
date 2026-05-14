@@ -181,6 +181,37 @@ def transcribe_gemini(
     return text.strip()
 
 
+def _gemini_with_round_robin(
+    image_png_bytes: bytes,
+    *,
+    pairs: list[tuple[str, str]],
+    timeout: int,
+    prompt: str,
+) -> str:
+    """Try each (api_key, model) pair in order. Advance on HTTP 429, raise otherwise.
+
+    Raises RuntimeError if every pair returns 429.
+    """
+    last_429: Exception | None = None
+    for api_key, model in pairs:
+        try:
+            return transcribe_gemini(
+                image_png_bytes,
+                api_key=api_key,
+                model=model,
+                timeout=timeout,
+                prompt=prompt,
+            )
+        except urllib.error.HTTPError as e:
+            if e.code == 429:
+                last_429 = e
+                continue
+            raise
+    raise RuntimeError(
+        f"all gemini (api_key, model) pairs returned 429 ({len(pairs)} tried)"
+    ) from last_429
+
+
 def process_pages(
     *,
     pdf_path: Path,
