@@ -14,7 +14,7 @@ Use the cheapest / fastest model that gets the job done. Defaults:
 | Decision | Default model | Escalate to | Never use by default |
 |---|---|---|---|
 | Per-page text vs OCR routing, engine choice, caption-or-skip | **Haiku** | Sonnet only after Haiku gives clearly wrong output twice | Opus |
-| OCR of scanned pages | **`glm-ocr` via LMStudio (≈2B, OCR-specialized, >150 tps on RTX 3090)** | `gemma-4-e2b-it` (2B general vision) or `gemma-4-e4b-it` (4B) after `glm-ocr` produces clearly wrong output twice. Gemini API round-robin is planned for Phase 2b. | PaddleOCR (Windows hell); paid OCR (Azure DI) only on explicit user request |
+| OCR of scanned pages | **`glm-ocr` via LMStudio (≈2B, OCR-specialized, >150 tps on RTX 3090)** | Gemini API free-tier Gemma models via `--engine gemini` when local is unavailable; or `gemma-4-e2b-it`/`gemma-4-e4b-it` via LMStudio for general vision. | PaddleOCR (Windows hell); paid OCR (Azure DI) only on explicit user request |
 | Vision captions for figures | **Gemini API round-robin on Gemma 4 models (free tier)** | Sonnet vision sparingly | Opus vision |
 | Heavy synthesis (NOT this skill — wiki only) | n/a | n/a | n/a |
 
@@ -114,6 +114,23 @@ Rerun is cache-aware: ok-status pages are skipped unless `--force`.
 
 Before processing, the script probes `/v1/models` and prints a warning if
 the requested model is not loaded (suppress with `--skip-model-check`).
+
+**Gemini cloud fallback (Phase 2b)** — when local LMStudio isn't available
+or you want a free-tier cloud benchmark:
+
+```bash
+export GEMINI_API_KEY=...   # or pass --api-key (repeatable)
+python skills/pdf-doc-extraction/scripts/ocr_page.py \
+  --pdf <substance>/<AGENCY>/<file>.pdf \
+  --extract-json <substance>/<AGENCY>/<file>.extract.json \
+  --out <substance>/<AGENCY>/ \
+  --engine gemini \
+  --gemini-models "gemma-3-27b-it,gemma-3-12b-it"
+```
+
+The (key, model) cross-product is rotated per page to spread load. On HTTP
+429, the dispatcher advances to the next pair and retries; only when every
+pair returns 429 does the page record `status: error`.
 
 ## Hard constraints
 

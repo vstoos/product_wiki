@@ -59,4 +59,20 @@ models the request is image-only (no instruction prompt) — instructions can
 confuse single-task OCR models. General vision models (e.g. `gemma-4-e2b-it`)
 get the full `OCR_PROMPT`. Override with `--prompt "..."`.
 
+### Cloud OCR via Gemini (Phase 2b)
+
+When LMStudio isn't available:
+
+```bash
+export GEMINI_API_KEY=...
+python scripts/ocr_page.py \
+  --pdf apalutamide/FDA/<file>.pdf \
+  --extract-json apalutamide/FDA/<file>.extract.json \
+  --out apalutamide/FDA/ \
+  --engine gemini --gemini-models "gemma-3-27b-it,gemma-3-12b-it"
+```
+
+Pass `--api-key` multiple times to round-robin across multiple keys for
+higher effective throughput on the free tier.
+
 See `SKILL.md` for the agent-facing contract.
