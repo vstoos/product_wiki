@@ -32,3 +32,23 @@ def test_parse_page_spec_dedupes_and_sorts():
 def test_parse_page_spec_rejects_invalid():
     with pytest.raises(ValueError):
         ocr_page.parse_page_spec("3,abc")
+
+
+def test_select_pages_prefers_explicit_pages():
+    result = ocr_page.select_pages(pages_spec="3,5", extract_metadata={"problem_pages": [10, 20]})
+    assert result == [3, 5]
+
+
+def test_select_pages_falls_back_to_extract_metadata():
+    result = ocr_page.select_pages(pages_spec=None, extract_metadata={"problem_pages": [10, 20]})
+    assert result == [10, 20]
+
+
+def test_select_pages_requires_one_source():
+    with pytest.raises(ValueError):
+        ocr_page.select_pages(pages_spec=None, extract_metadata=None)
+
+
+def test_select_pages_empty_problem_pages_returns_empty():
+    result = ocr_page.select_pages(pages_spec=None, extract_metadata={"problem_pages": []})
+    assert result == []

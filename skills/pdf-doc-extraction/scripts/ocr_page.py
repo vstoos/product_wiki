@@ -34,3 +34,20 @@ def parse_page_spec(spec: str) -> list[int]:
         else:
             pages.add(int(part))
     return sorted(pages)
+
+
+def select_pages(
+    pages_spec: str | None,
+    extract_metadata: dict | None,
+) -> list[int]:
+    """Choose pages to OCR.
+
+    Precedence: explicit --pages > extract.json::problem_pages.
+    At least one source must be provided.
+    """
+    if pages_spec is not None:
+        return parse_page_spec(pages_spec)
+    if extract_metadata is None:
+        raise ValueError("either --pages or --extract-json must be provided")
+    problem_pages = extract_metadata.get("problem_pages", [])
+    return sorted(set(int(p) for p in problem_pages))
