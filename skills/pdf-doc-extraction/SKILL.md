@@ -14,11 +14,11 @@ Use the cheapest / fastest model that gets the job done. Defaults:
 | Decision | Default model | Escalate to | Never use by default |
 |---|---|---|---|
 | Per-page text vs OCR routing, engine choice, caption-or-skip | **Haiku** | Sonnet only after Haiku gives clearly wrong output twice | Opus |
-| OCR of scanned pages | **`glm-ocr` via LMStudio (≈2B, OCR-specialized, >150 tps on RTX 3090)** | Gemini API free-tier Gemma models via `--engine gemini` when local is unavailable; or `gemma-4-e2b-it`/`gemma-4-e4b-it` via LMStudio for general vision. | PaddleOCR (Windows hell); paid OCR (Azure DI) only on explicit user request |
+| OCR of scanned pages | **`glm-ocr` via LMStudio (≈891M params Q8_0, OCR-specialized, >150 tps on a Mobile RTX 3060 6 GB)** | Gemini API free-tier Gemma models via `--engine gemini` when local is unavailable; or `gemma-4-e2b-it`/`gemma-4-e4b-it` via LMStudio for general vision. | PaddleOCR (Windows hell); paid OCR (Azure DI) only on explicit user request |
 | Vision captions for figures | **Gemini API round-robin on Gemma 4 models (free tier)** | Sonnet vision sparingly | Opus vision |
 | Heavy synthesis (NOT this skill — wiki only) | n/a | n/a | n/a |
 
-Local-LLM swap-in (RTX 3090, future): change the OCR/caption tool's `--engine` flag; SKILL.md and orchestration stay identical.
+Local hardware budget today: Mobile RTX 3060 6 GB (~5.5 GB usable). Caps comfortable model size at ≈4-5B at moderate quantization. Future eGPU with RTX 3090 would lift the ceiling; the `--engine` flag and orchestration stay identical when the swap happens.
 
 ## What this skill produces per input PDF
 

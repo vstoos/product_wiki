@@ -25,7 +25,7 @@ Phase 2 does NOT modify Phase 1 outputs. The final merged markdown is produced b
 
 - **No PaddleOCR.** Caused Windows / WSL / Docker conflicts in prior work.
 - **No new Python dependencies.** Stdlib `urllib.request` for HTTP, existing `fitz` (PyMuPDF) for page→PNG rendering, existing `pytest` for tests.
-- **Cheap, OCR-specialized model by default.** `glm-ocr` (≈2B, OCR-specialized, >150 tps output on user's RTX 3090, few seconds for prompt processing). Escalate only on demonstrated failure. `gemma-4-e2b-it` (2B general vision) is the documented alternative.
+- **Cheap, OCR-specialized model by default.** `glm-ocr` (≈891M params Q8_0, OCR-specialized, >150 tps on user's Mobile RTX 3060 6 GB, few seconds for prompt processing). Escalate only on demonstrated failure. `gemma-4-e2b-it` (2B general vision) is the documented alternative.
 - **One image per request.** Each page is a fresh HTTP POST with its own message array; no conversation context carried between pages. Avoids accidental cross-page contamination and matches LMStudio's per-request prompt-processing cost model.
 - **No live model calls in tests.** All HTTP is mocked.
 - **Don't OCR pages with clean text.** Process only pages from `extract.json::problem_pages`, unless `--pages` overrides.
@@ -189,7 +189,7 @@ The model-selection table in `SKILL.md` is updated:
 | Decision | Default | Escalate to | Never |
 |---|---|---|---|
 | Per-page text vs OCR routing | **Haiku** | Sonnet only after Haiku gives clearly wrong output twice | Opus |
-| OCR of scanned pages | **`glm-ocr` via LMStudio (≈2B, OCR-specialized, >150 tps on RTX 3090)** | `gemma-4-e2b-it` (2B general vision) or `gemma-4-e4b-it` (4B) after `glm-ocr` produces clearly wrong output twice | PaddleOCR (Windows hell); paid OCR (Azure DI) only on explicit user request |
+| OCR of scanned pages | **`glm-ocr` via LMStudio (≈891M params Q8_0, OCR-specialized, >150 tps on Mobile RTX 3060 6 GB)** | `gemma-4-e2b-it` (2B general vision) or `gemma-4-e4b-it` (4B) after `glm-ocr` produces clearly wrong output twice | PaddleOCR (Windows hell); paid OCR (Azure DI) only on explicit user request |
 | Vision captions for figures (Phase 3) | **Gemini API round-robin on Gemma 4 (free tier)** OR LMStudio Gemma 4 | Sonnet vision sparingly | Opus vision |
 
 Gemini round-robin is documented as **Phase 2b — planned next**.
