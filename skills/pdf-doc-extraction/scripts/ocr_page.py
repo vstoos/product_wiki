@@ -11,6 +11,9 @@ Usage:
 from __future__ import annotations
 
 import sys
+from pathlib import Path
+
+import fitz  # PyMuPDF
 
 
 def parse_page_spec(spec: str) -> list[int]:
@@ -51,3 +54,20 @@ def select_pages(
         raise ValueError("either --pages or --extract-json must be provided")
     problem_pages = extract_metadata.get("problem_pages", [])
     return sorted(set(int(p) for p in problem_pages))
+
+
+def render_page_png(pdf_path: Path, page_number: int, dpi: int) -> bytes:
+    """Render the given 1-indexed page to PNG bytes at the given DPI.
+
+    Raises IndexError if page_number is out of range.
+    """
+    if page_number < 1:
+        raise ValueError(f"page_number must be >= 1, got {page_number}")
+    zoom = dpi / 72.0
+    matrix = fitz.Matrix(zoom, zoom)
+    with fitz.open(pdf_path) as doc:
+        if page_number > doc.page_count:
+            raise IndexError(f"page {page_number} out of range (doc has {doc.page_count} pages)")
+        page = doc[page_number - 1]  # 1-indexed -> 0-indexed
+        pix = page.get_pixmap(matrix=matrix, alpha=False)
+        return pix.tobytes("png")

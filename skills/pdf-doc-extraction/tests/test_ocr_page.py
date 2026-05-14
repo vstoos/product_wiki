@@ -52,3 +52,17 @@ def test_select_pages_requires_one_source():
 def test_select_pages_empty_problem_pages_returns_empty():
     result = ocr_page.select_pages(pages_spec=None, extract_metadata={"problem_pages": []})
     assert result == []
+
+
+PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+
+
+def test_render_page_png_returns_png_bytes(suppl11_pdf):
+    data = ocr_page.render_page_png(suppl11_pdf, page_number=1, dpi=150)
+    assert data.startswith(PNG_MAGIC)
+    assert len(data) > 1000
+
+
+def test_render_page_png_invalid_page_raises(suppl11_pdf):
+    with pytest.raises((IndexError, ValueError)):
+        ocr_page.render_page_png(suppl11_pdf, page_number=9999, dpi=150)
