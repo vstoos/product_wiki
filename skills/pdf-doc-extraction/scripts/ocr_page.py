@@ -13,13 +13,18 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import re
 import sys
 import time
+import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
 import fitz  # PyMuPDF
+
+
+OCR_MODEL_PATTERN = re.compile(r"ocr", re.IGNORECASE)
 
 
 def parse_page_spec(spec: str) -> list[int]:
@@ -101,6 +106,7 @@ def transcribe_lmstudio(
     host: str,
     model: str,
     timeout: int,
+    prompt: str = OCR_PROMPT,
 ) -> str:
     """POST the image to a local LMStudio OpenAI-compatible vision endpoint.
 
@@ -108,22 +114,20 @@ def transcribe_lmstudio(
     Raises on HTTP errors, network errors, and malformed responses.
 
     One image per request: no conversation context is carried between pages.
+    If `prompt` is empty, the request is image-only (no text content item) -
+    appropriate for OCR-specialized models that are confused by instructions.
     """
     b64 = base64.b64encode(image_png_bytes).decode("ascii")
+    content: list[dict] = []
+    if prompt:
+        content.append({"type": "text", "text": prompt})
+    content.append({
+        "type": "image_url",
+        "image_url": {"url": f"data:image/png;base64,{b64}"},
+    })
     payload = {
         "model": model,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": OCR_PROMPT},
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/png;base64,{b64}"},
-                    },
-                ],
-            }
-        ],
+        "messages": [{"role": "user", "content": content}],
         "temperature": 0.0,
         "max_tokens": 4096,
     }
@@ -146,6 +150,7 @@ def process_pages(
     host: str,
     model: str,
     timeout: int,
+    prompt: str = OCR_PROMPT,
 ) -> list[dict]:
     """Render and transcribe each page. Per-page errors are recorded, not raised.
 
@@ -158,7 +163,7 @@ def process_pages(
         try:
             png = render_page_png(pdf_path, page_number=pn, dpi=dpi)
             text = transcribe_lmstudio(
-                png, host=host, model=model, timeout=timeout
+                png, host=host, model=model, timeout=timeout, prompt=prompt
             )
             results.append({
                 "page_number": pn,
@@ -222,6 +227,40 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def resolve_prompt(*, user_prompt: str | None, model: str) -> tuple[str, str]:
+    """Decide which prompt to send and label its source.
+
+    Returns (prompt, mode) where mode is one of:
+      - 'user'         : --prompt was given (including empty string)
+      - 'auto-empty'   : model name matches OCR_MODEL_PATTERN -> no instruction
+      - 'auto-default' : general vision model -> use OCR_PROMPT
+    """
+    if user_prompt is not None:
+        return user_prompt, "user"
+    if OCR_MODEL_PATTERN.search(model):
+        return "", "auto-empty"
+    return OCR_PROMPT, "auto-default"
+
+
+def check_model_loaded(*, host: str, model: str, timeout: int = 5) -> str | None:
+    """Query <host>/v1/models. Return None if model is loaded, else a warning string.
+
+    Network/HTTP errors yield a warning rather than raising - per-page errors
+    in process_pages give the user the real diagnostic.
+    """
+    try:
+        with urllib.request.urlopen(
+            f"{host.rstrip('/')}/v1/models", timeout=timeout
+        ) as resp:
+            body = json.loads(resp.read())
+    except (urllib.error.URLError, urllib.error.HTTPError, OSError) as e:
+        return f"could not query {host}/v1/models ({type(e).__name__}: {e}) - is LMStudio running?"
+    loaded_ids = [m.get("id") for m in body.get("data", [])]
+    if model in loaded_ids:
+        return None
+    return f"model '{model}' is not loaded; loaded: {loaded_ids}. Try: lms load {model} --gpu max -y"
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="OCR scanned/problem pages of a PDF via LMStudio."
@@ -255,6 +294,16 @@ def main(argv: list[str] | None = None) -> int:
                         help="Reprocess pages even if already cached as ok")
     parser.add_argument("--timeout", type=int, default=120,
                         help="Per-page HTTP timeout (seconds)")
+    parser.add_argument(
+        "--prompt",
+        default=None,
+        help="Override the OCR prompt. Empty string -> image-only request. "
+             "Default: auto-empty for OCR-specialized models (name matches /ocr/i), "
+             "OCR_PROMPT for general vision models.",
+    )
+    parser.add_argument("--skip-model-check", action="store_true",
+                        help="Skip the early /v1/models probe that warns if the "
+                             "requested model isn't loaded in LMStudio.")
     parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args(argv)
 
@@ -269,6 +318,13 @@ def main(argv: list[str] | None = None) -> int:
     cache = load_existing_cache(ocr_json_path)
     to_do = pages_to_process(requested=requested, cache=cache, force=args.force)
 
+    prompt, prompt_mode = resolve_prompt(user_prompt=args.prompt, model=args.model)
+
+    if to_do and not args.skip_model_check:
+        warning = check_model_loaded(host=args.host, model=args.model)
+        if warning and not args.quiet:
+            print(f"WARNING: {warning}", file=sys.stderr)
+
     t0 = time.monotonic()
     new_pages = process_pages(
         pdf_path=args.pdf,
@@ -277,6 +333,7 @@ def main(argv: list[str] | None = None) -> int:
         host=args.host,
         model=args.model,
         timeout=args.timeout,
+        prompt=prompt,
     )
     total_seconds = round(time.monotonic() - t0, 3)
 
@@ -287,6 +344,7 @@ def main(argv: list[str] | None = None) -> int:
         "model": args.model,
         "host": args.host,
         "dpi": args.dpi,
+        "prompt_mode": prompt_mode,
         "ocr_date": _utc_now_iso(),
         "total_seconds": total_seconds,
         "pages": merged_pages,
@@ -300,6 +358,7 @@ def main(argv: list[str] | None = None) -> int:
             "pdf": str(args.pdf),
             "engine": args.engine,
             "model": args.model,
+            "prompt_mode": prompt_mode,
             "pages_requested": len(requested),
             "pages_processed": len(new_pages),
             "pages_skipped_cached": len(requested) - len(to_do),

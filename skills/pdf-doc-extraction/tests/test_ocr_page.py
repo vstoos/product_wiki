@@ -142,7 +142,7 @@ def test_transcribe_lmstudio_propagates_http_error():
 def test_process_pages_records_per_page_errors(suppl11_pdf):
     call_count = {"n": 0}
 
-    def fake_transcribe(image_bytes, *, host, model, timeout):
+    def fake_transcribe(image_bytes, *, host, model, timeout, prompt=None):
         call_count["n"] += 1
         if call_count["n"] == 2:
             raise RuntimeError("backend exploded")
@@ -339,3 +339,111 @@ def test_cli_force_reprocesses_cached_page(suppl11_pdf, tmp_path):
 
     payload = _json.loads(ocr_json_path.read_text())
     assert payload["pages"][0]["text"] == "FRESH"
+
+
+# ---- Phase 2.1: prompt resolution + image-only path + model-loaded check ----
+
+
+def test_resolve_prompt_user_override_wins():
+    p, mode = ocr_page.resolve_prompt(user_prompt="ABC", model="glm-ocr")
+    assert p == "ABC" and mode == "user"
+
+
+def test_resolve_prompt_user_empty_string_is_explicit():
+    p, mode = ocr_page.resolve_prompt(user_prompt="", model="gemma-4-e2b-it")
+    assert p == "" and mode == "user"
+
+
+def test_resolve_prompt_auto_empty_for_ocr_models():
+    for name in ["glm-ocr", "GLM-OCR-GGUF", "deepseek-ocr", "lightonocr-2-1b"]:
+        p, mode = ocr_page.resolve_prompt(user_prompt=None, model=name)
+        assert p == "" and mode == "auto-empty", f"failed for {name}"
+
+
+def test_resolve_prompt_auto_default_for_general_vision():
+    for name in ["gemma-4-e2b-it", "gemma-4-e4b-it", "qwen3.5-2b"]:
+        p, mode = ocr_page.resolve_prompt(user_prompt=None, model=name)
+        assert p == ocr_page.OCR_PROMPT and mode == "auto-default", f"failed for {name}"
+
+
+def test_transcribe_lmstudio_omits_text_item_when_prompt_empty():
+    captured = {}
+
+    def fake_urlopen(req, timeout=None):
+        captured["body"] = _json.loads(req.data.decode("utf-8"))
+        return _MockResponse({"choices": [{"message": {"content": "OUT"}}]})
+
+    with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+        ocr_page.transcribe_lmstudio(
+            b"\x89PNG", host="http://localhost:1234", model="glm-ocr",
+            timeout=60, prompt="",
+        )
+    content = captured["body"]["messages"][0]["content"]
+    types = [c["type"] for c in content]
+    assert types == ["image_url"], f"expected image-only, got {types}"
+
+
+def test_transcribe_lmstudio_includes_text_item_when_prompt_set():
+    captured = {}
+
+    def fake_urlopen(req, timeout=None):
+        captured["body"] = _json.loads(req.data.decode("utf-8"))
+        return _MockResponse({"choices": [{"message": {"content": "OUT"}}]})
+
+    with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+        ocr_page.transcribe_lmstudio(
+            b"\x89PNG", host="http://localhost:1234", model="m",
+            timeout=60, prompt="custom-prompt",
+        )
+    content = captured["body"]["messages"][0]["content"]
+    text_items = [c for c in content if c["type"] == "text"]
+    assert len(text_items) == 1
+    assert text_items[0]["text"] == "custom-prompt"
+
+
+def test_check_model_loaded_returns_none_when_loaded():
+    body = {"data": [{"id": "glm-ocr"}, {"id": "other"}]}
+    with patch("urllib.request.urlopen", return_value=_MockResponse(body)):
+        warning = ocr_page.check_model_loaded(host="http://localhost:1234", model="glm-ocr")
+    assert warning is None
+
+
+def test_check_model_loaded_warns_when_missing():
+    body = {"data": [{"id": "other"}]}
+    with patch("urllib.request.urlopen", return_value=_MockResponse(body)):
+        warning = ocr_page.check_model_loaded(host="http://localhost:1234", model="glm-ocr")
+    assert warning is not None
+    assert "glm-ocr" in warning
+    assert "lms load" in warning
+
+
+def test_check_model_loaded_warns_on_network_error():
+    import urllib.error
+    err = urllib.error.URLError("connection refused")
+    with patch("urllib.request.urlopen", side_effect=err):
+        warning = ocr_page.check_model_loaded(host="http://localhost:1234", model="m")
+    assert warning is not None
+    assert "could not query" in warning
+
+
+def test_cli_records_prompt_mode_in_output(suppl11_pdf, tmp_path):
+    body = {"choices": [{"message": {"content": "OUT"}}]}
+    models_body = {"data": [{"id": "glm-ocr"}]}
+
+    def fake_urlopen(req, timeout=None):
+        # /v1/models is called with a URL string; /v1/chat/completions with a Request
+        url = req if isinstance(req, str) else req.full_url
+        if "/v1/models" in url:
+            return _MockResponse(models_body)
+        return _MockResponse(body)
+
+    with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+        rc = ocr_page.main([
+            "--pdf", str(suppl11_pdf),
+            "--pages", "1",
+            "--out", str(tmp_path),
+            "--quiet",
+        ])
+    assert rc == 0
+    payload = _json.loads((tmp_path / f"{suppl11_pdf.stem}.ocr.json").read_text())
+    assert payload["prompt_mode"] == "auto-empty"  # default model is glm-ocr

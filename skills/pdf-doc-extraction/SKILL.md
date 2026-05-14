@@ -39,6 +39,7 @@ The shape on disk follows the convention already established by upstream extract
 |---|---|---|
 | `scripts/extract_text.py` | shipped | PyMuPDF text extraction → `<stem>.md` + `<stem>.extract.json`. Flags problem pages (text < 100 chars) for a later OCR pass. |
 | `scripts/ocr_page.py` | shipped | LMStudio OCR for problem pages. Reads Phase 1's `<stem>.extract.json`, transcribes flagged pages, writes `<stem>.ocr.json`. Gemini API round-robin is Phase 2b. |
+| `scripts/ensure_lmstudio.ps1` | shipped | PowerShell wrapper that starts the LMStudio server and loads a model if not already loaded. One-liner pre-flight for `ocr_page.py`. |
 | `scripts/extract_figures.py` | planned | Raster + vector figures into `<stem>.assets/`. |
 | `scripts/caption_figure.py` | planned | Vision-model caption per figure. Free-tier Gemma 4. |
 | `scripts/assemble_md.py` | planned | Stitch text + OCR + figures + captions into the final `<stem>.md`. |
@@ -79,8 +80,17 @@ Writes `<stem>.md` and `<stem>.extract.json` next to the PDF.
 ### OCR pass (Phase 2)
 
 Requires LMStudio running locally with a vision-capable model loaded
-(default: `glm-ocr`). Start LMStudio's local server on port 1234
-before invoking.
+(default: `glm-ocr`). One-liner pre-flight (PowerShell):
+
+```powershell
+.\skills\pdf-doc-extraction\scripts\ensure_lmstudio.ps1
+```
+
+This starts the server (if down) and loads `glm-ocr` (if not already loaded)
+with a 10-min auto-unload TTL. Override the model with `-Model gemma-4-e2b-it`.
+The script is idempotent.
+
+Then OCR:
 
 ```bash
 python skills/pdf-doc-extraction/scripts/ocr_page.py \
@@ -92,6 +102,18 @@ python skills/pdf-doc-extraction/scripts/ocr_page.py \
 Reads `problem_pages` from the extract sidecar, transcribes each, writes
 `<stem>.ocr.json`. Override which pages to OCR with `--pages "3,5,7-9"`.
 Rerun is cache-aware: ok-status pages are skipped unless `--force`.
+
+**Prompt mode is auto-selected by model name:**
+- Models matching `/ocr/i` (e.g. `glm-ocr`, `deepseek-ocr`, `lightonocr-*`) get
+  an **image-only request** with no instruction text — they are trained for
+  the single task and instructions can confuse them.
+- General vision models (e.g. `gemma-4-e2b-it`) get the full `OCR_PROMPT`
+  with rules for tables, special characters, and redactions.
+- Override with `--prompt "..."`. The chosen mode is recorded in the output
+  JSON as `prompt_mode: auto-empty | auto-default | user`.
+
+Before processing, the script probes `/v1/models` and prints a warning if
+the requested model is not loaded (suppress with `--skip-model-check`).
 
 ## Hard constraints
 
