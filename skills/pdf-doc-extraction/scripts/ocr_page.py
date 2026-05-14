@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import os
 import re
 import sys
 import time
@@ -217,10 +218,12 @@ def process_pages(
     pdf_path: Path,
     page_numbers: list[int],
     dpi: int,
-    host: str,
-    model: str,
-    timeout: int,
+    engine: str = "lmstudio",
+    host: str = "http://localhost:1234",
+    model: str = "glm-ocr",
+    timeout: int = 120,
     prompt: str = OCR_PROMPT,
+    gemini_pairs: list[tuple[str, str]] | None = None,
 ) -> list[dict]:
     """Render and transcribe each page. Per-page errors are recorded, not raised.
 
@@ -228,13 +231,23 @@ def process_pages(
       {page_number, text, char_count, duration_sec, status, [error]}
     """
     results: list[dict] = []
+    pairs = list(gemini_pairs or [])
     for pn in page_numbers:
         t0 = time.monotonic()
         try:
             png = render_page_png(pdf_path, page_number=pn, dpi=dpi)
-            text = transcribe_lmstudio(
-                png, host=host, model=model, timeout=timeout, prompt=prompt
-            )
+            if engine == "gemini":
+                if not pairs:
+                    raise RuntimeError("engine=gemini requires non-empty gemini_pairs")
+                text = _gemini_with_round_robin(
+                    png, pairs=pairs, timeout=timeout, prompt=prompt
+                )
+                # Rotate after each successful call to spread load
+                pairs = pairs[1:] + pairs[:1]
+            else:
+                text = transcribe_lmstudio(
+                    png, host=host, model=model, timeout=timeout, prompt=prompt
+                )
             results.append({
                 "page_number": pn,
                 "text": text,
@@ -349,8 +362,8 @@ def main(argv: list[str] | None = None) -> int:
         help="Output directory; <stem>.ocr.json is written here",
     )
     parser.add_argument(
-        "--engine", default="lmstudio", choices=["lmstudio"],
-        help="OCR backend (only 'lmstudio' in Phase 2)",
+        "--engine", default="lmstudio", choices=["lmstudio", "gemini"],
+        help="OCR backend",
     )
     parser.add_argument("--model", default="glm-ocr")
     parser.add_argument("--host", default="http://localhost:1234")
@@ -375,10 +388,41 @@ def main(argv: list[str] | None = None) -> int:
                         help="Skip the early /v1/models probe that warns if the "
                              "requested model isn't loaded in LMStudio.")
     parser.add_argument("--quiet", action="store_true")
+    parser.add_argument(
+        "--api-key", action="append", default=None,
+        help="Gemini API key. Repeatable for round-robin across multiple keys. "
+             "If omitted, falls back to GEMINI_API_KEY env var.",
+    )
+    parser.add_argument(
+        "--gemini-models",
+        default=None,
+        help="Comma-separated Gemini model names (required for --engine gemini). "
+             "Example: 'gemma-3-27b-it,gemma-3-12b-it'.",
+    )
     args = parser.parse_args(argv)
 
     args.out.mkdir(parents=True, exist_ok=True)
     ocr_json_path = args.out / f"{args.pdf.stem}.ocr.json"
+
+    gemini_pairs: list[tuple[str, str]] = []
+    if args.engine == "gemini":
+        keys = list(args.api_key or [])
+        env_key = os.environ.get("GEMINI_API_KEY")
+        if not keys and env_key:
+            keys = [env_key]
+        if not keys:
+            print("error: --engine gemini requires --api-key or GEMINI_API_KEY env var",
+                  file=sys.stderr)
+            return 2
+        if not args.gemini_models:
+            print("error: --engine gemini requires --gemini-models (comma-separated)",
+                  file=sys.stderr)
+            return 2
+        models = [m.strip() for m in args.gemini_models.split(",") if m.strip()]
+        if not models:
+            print("error: --gemini-models is empty after parsing", file=sys.stderr)
+            return 2
+        gemini_pairs = [(k, m) for k in keys for m in models]
 
     extract_metadata = None
     if args.extract_json is not None:
@@ -390,7 +434,7 @@ def main(argv: list[str] | None = None) -> int:
 
     prompt, prompt_mode = resolve_prompt(user_prompt=args.prompt, model=args.model)
 
-    if to_do and not args.skip_model_check:
+    if to_do and args.engine == "lmstudio" and not args.skip_model_check:
         warning = check_model_loaded(host=args.host, model=args.model)
         if warning and not args.quiet:
             print(f"WARNING: {warning}", file=sys.stderr)
@@ -400,10 +444,12 @@ def main(argv: list[str] | None = None) -> int:
         pdf_path=args.pdf,
         page_numbers=to_do,
         dpi=args.dpi,
+        engine=args.engine,
         host=args.host,
         model=args.model,
         timeout=args.timeout,
         prompt=prompt,
+        gemini_pairs=gemini_pairs,
     )
     total_seconds = round(time.monotonic() - t0, 3)
 

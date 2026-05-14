@@ -566,3 +566,66 @@ def test_gemini_round_robin_propagates_non_429_errors():
                 timeout=60,
                 prompt="x",
             )
+
+
+def test_cli_gemini_dispatches_to_gemini_backend(suppl11_pdf, tmp_path, monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "ENV_KEY")
+    captured_calls = []
+
+    def fake_urlopen(req, timeout=None):
+        url = req if isinstance(req, str) else req.full_url
+        captured_calls.append(url)
+        if "/v1/models" in url:
+            return _MockResponse({"data": []})
+        if "generativelanguage.googleapis.com" in url:
+            return _MockResponse({"candidates": [{"content": {"parts": [{"text": "GEM"}]}}]})
+        raise AssertionError(f"unexpected URL: {url}")
+
+    with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+        rc = ocr_page.main([
+            "--pdf", str(suppl11_pdf),
+            "--pages", "1",
+            "--out", str(tmp_path),
+            "--engine", "gemini",
+            "--gemini-models", "gemma-3-27b-it",
+            "--skip-model-check",
+            "--quiet",
+        ])
+    assert rc == 0
+    gem_calls = [u for u in captured_calls if "generativelanguage" in u]
+    assert len(gem_calls) == 1
+    payload = _json.loads((tmp_path / f"{suppl11_pdf.stem}.ocr.json").read_text())
+    assert payload["engine"] == "gemini"
+    assert payload["pages"][0]["text"] == "GEM"
+    assert payload["pages"][0]["status"] == "ok"
+
+
+def test_cli_gemini_requires_api_key(suppl11_pdf, tmp_path, monkeypatch, capsys):
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    rc = ocr_page.main([
+        "--pdf", str(suppl11_pdf),
+        "--pages", "1",
+        "--out", str(tmp_path),
+        "--engine", "gemini",
+        "--gemini-models", "gemma-3-27b-it",
+        "--skip-model-check",
+        "--quiet",
+    ])
+    assert rc != 0
+    err = capsys.readouterr().err
+    assert "GEMINI_API_KEY" in err or "--api-key" in err
+
+
+def test_cli_gemini_requires_models(suppl11_pdf, tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("GEMINI_API_KEY", "KEY")
+    rc = ocr_page.main([
+        "--pdf", str(suppl11_pdf),
+        "--pages", "1",
+        "--out", str(tmp_path),
+        "--engine", "gemini",
+        "--skip-model-check",
+        "--quiet",
+    ])
+    assert rc != 0
+    err = capsys.readouterr().err
+    assert "--gemini-models" in err
