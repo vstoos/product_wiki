@@ -181,3 +181,62 @@ def test_process_pages_empty_list_returns_empty():
         timeout=1,
     )
     assert results == []
+
+
+def test_load_existing_cache_missing_returns_none(tmp_path):
+    assert ocr_page.load_existing_cache(tmp_path / "missing.ocr.json") is None
+
+
+def test_load_existing_cache_reads_json(tmp_path):
+    path = tmp_path / "stem.ocr.json"
+    path.write_text(_json.dumps({"pages": [{"page_number": 5, "status": "ok", "text": "x"}]}))
+    cache = ocr_page.load_existing_cache(path)
+    assert cache is not None
+    assert cache["pages"][0]["page_number"] == 5
+
+
+def test_pages_to_process_excludes_cached_ok():
+    cache = {"pages": [
+        {"page_number": 5, "status": "ok"},
+        {"page_number": 7, "status": "error"},
+    ]}
+    to_do = ocr_page.pages_to_process(
+        requested=[5, 6, 7, 8], cache=cache, force=False
+    )
+    # 5 is cached-ok -> skip; 7 is cached-error -> retry; 6, 8 are new
+    assert to_do == [6, 7, 8]
+
+
+def test_pages_to_process_force_reprocesses_all():
+    cache = {"pages": [
+        {"page_number": 5, "status": "ok"},
+        {"page_number": 7, "status": "error"},
+    ]}
+    assert ocr_page.pages_to_process(
+        requested=[5, 6, 7], cache=cache, force=True
+    ) == [5, 6, 7]
+
+
+def test_pages_to_process_no_cache_returns_all():
+    assert ocr_page.pages_to_process(
+        requested=[1, 2, 3], cache=None, force=False
+    ) == [1, 2, 3]
+
+
+def test_merge_with_cache_new_wins_over_old():
+    cache = {"pages": [
+        {"page_number": 5, "status": "ok", "text": "OLD"},
+        {"page_number": 7, "status": "error"},
+    ]}
+    new = [{"page_number": 7, "status": "ok", "text": "NEW"}]
+    merged = ocr_page.merge_with_cache(new_pages=new, cache=cache)
+    by_pn = {p["page_number"]: p for p in merged}
+    assert by_pn[5]["text"] == "OLD"
+    assert by_pn[7]["text"] == "NEW"
+    assert [p["page_number"] for p in merged] == [5, 7]  # sorted by page_number
+
+
+def test_merge_with_cache_no_cache_returns_new_sorted():
+    new = [{"page_number": 7, "text": "b"}, {"page_number": 3, "text": "a"}]
+    merged = ocr_page.merge_with_cache(new_pages=new, cache=None)
+    assert [p["page_number"] for p in merged] == [3, 7]

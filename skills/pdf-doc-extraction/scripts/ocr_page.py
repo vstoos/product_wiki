@@ -175,3 +175,42 @@ def process_pages(
                 "error": f"{type(e).__name__}: {e}",
             })
     return results
+
+
+def load_existing_cache(json_path: Path) -> dict | None:
+    """Load an existing <stem>.ocr.json if present, else None."""
+    if not json_path.exists():
+        return None
+    return json.loads(json_path.read_text(encoding="utf-8"))
+
+
+def pages_to_process(
+    *, requested: list[int], cache: dict | None, force: bool
+) -> list[int]:
+    """Return the subset of requested pages that actually need processing.
+
+    Cached pages with status='ok' are skipped (unless --force).
+    Cached pages with status='error' are always retried.
+    """
+    if force or cache is None:
+        return list(requested)
+    ok_pages = {
+        p["page_number"]
+        for p in cache.get("pages", [])
+        if p.get("status") == "ok"
+    }
+    return [pn for pn in requested if pn not in ok_pages]
+
+
+def merge_with_cache(*, new_pages: list[dict], cache: dict | None) -> list[dict]:
+    """Combine new and cached page entries. New entries win on conflict.
+
+    Result is sorted by page_number.
+    """
+    by_pn: dict[int, dict] = {}
+    if cache is not None:
+        for p in cache.get("pages", []):
+            by_pn[p["page_number"]] = p
+    for p in new_pages:
+        by_pn[p["page_number"]] = p
+    return [by_pn[pn] for pn in sorted(by_pn)]
