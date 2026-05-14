@@ -629,3 +629,92 @@ def test_cli_gemini_requires_models(suppl11_pdf, tmp_path, monkeypatch, capsys):
     assert rc != 0
     err = capsys.readouterr().err
     assert "--gemini-models" in err
+
+
+def test_cli_gemini_uses_first_gemini_model_for_prompt_resolution(suppl11_pdf, tmp_path, monkeypatch):
+    """Prompt mode is decided against the actual model that will receive the request.
+
+    With --engine gemini and --gemini-models gemma-3-27b-it, prompt_mode must be
+    'auto-default' (general vision -> use OCR_PROMPT) even though --model still
+    defaults to glm-ocr (which never reaches the wire).
+    """
+    monkeypatch.setenv("GEMINI_API_KEY", "K")
+    captured_payloads = []
+
+    def fake_urlopen(req, timeout=None):
+        url = req if isinstance(req, str) else req.full_url
+        if "generativelanguage.googleapis.com" in url:
+            body = _json.loads(req.data.decode("utf-8"))
+            captured_payloads.append(body)
+            return _MockResponse({"candidates": [{"content": {"parts": [{"text": "X"}]}}]})
+        return _MockResponse({"data": []})
+
+    with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+        rc = ocr_page.main([
+            "--pdf", str(suppl11_pdf),
+            "--pages", "1",
+            "--out", str(tmp_path),
+            "--engine", "gemini",
+            "--gemini-models", "gemma-3-27b-it",
+            "--skip-model-check",
+            "--quiet",
+        ])
+    assert rc == 0
+
+    # Sent payload should include the OCR_PROMPT text (general vision model)
+    parts = captured_payloads[0]["contents"][0]["parts"]
+    text_parts = [p for p in parts if "text" in p]
+    assert len(text_parts) == 1
+    assert text_parts[0]["text"] == ocr_page.OCR_PROMPT
+
+    payload = _json.loads((tmp_path / f"{suppl11_pdf.stem}.ocr.json").read_text())
+    assert payload["prompt_mode"] == "auto-default"
+
+
+def test_cli_gemini_records_gemini_models_in_output(suppl11_pdf, tmp_path, monkeypatch):
+    """For ALCOA provenance, gemini_models must be persisted in the output JSON."""
+    monkeypatch.setenv("GEMINI_API_KEY", "K")
+
+    def fake_urlopen(req, timeout=None):
+        url = req if isinstance(req, str) else req.full_url
+        if "generativelanguage.googleapis.com" in url:
+            return _MockResponse({"candidates": [{"content": {"parts": [{"text": "X"}]}}]})
+        return _MockResponse({"data": []})
+
+    with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+        rc = ocr_page.main([
+            "--pdf", str(suppl11_pdf),
+            "--pages", "1",
+            "--out", str(tmp_path),
+            "--engine", "gemini",
+            "--gemini-models", "gemma-3-27b-it,gemma-3-12b-it",
+            "--skip-model-check",
+            "--quiet",
+        ])
+    assert rc == 0
+    payload = _json.loads((tmp_path / f"{suppl11_pdf.stem}.ocr.json").read_text())
+    assert payload["gemini_models"] == "gemma-3-27b-it,gemma-3-12b-it"
+
+
+def test_cli_lmstudio_does_not_record_gemini_models(suppl11_pdf, tmp_path):
+    """LMStudio runs should not have a stale gemini_models field."""
+    body = {"choices": [{"message": {"content": "X"}}]}
+    models_body = {"data": [{"id": "glm-ocr"}]}
+
+    def fake_urlopen(req, timeout=None):
+        url = req if isinstance(req, str) else req.full_url
+        if "/v1/models" in url:
+            return _MockResponse(models_body)
+        return _MockResponse(body)
+
+    with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+        rc = ocr_page.main([
+            "--pdf", str(suppl11_pdf),
+            "--pages", "1",
+            "--out", str(tmp_path),
+            "--quiet",
+        ])
+    assert rc == 0
+    payload = _json.loads((tmp_path / f"{suppl11_pdf.stem}.ocr.json").read_text())
+    assert "gemini_models" not in payload
+

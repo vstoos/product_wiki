@@ -432,7 +432,13 @@ def main(argv: list[str] | None = None) -> int:
     cache = load_existing_cache(ocr_json_path)
     to_do = pages_to_process(requested=requested, cache=cache, force=args.force)
 
-    prompt, prompt_mode = resolve_prompt(user_prompt=args.prompt, model=args.model)
+    # For prompt resolution, use the actual model that will receive the request:
+    # - LMStudio engine -> args.model (default glm-ocr)
+    # - Gemini engine   -> first --gemini-models entry (e.g. gemma-3-27b-it)
+    prompt_model = (
+        gemini_pairs[0][1] if args.engine == "gemini" and gemini_pairs else args.model
+    )
+    prompt, prompt_mode = resolve_prompt(user_prompt=args.prompt, model=prompt_model)
 
     if to_do and args.engine == "lmstudio" and not args.skip_model_check:
         warning = check_model_loaded(host=args.host, model=args.model)
@@ -465,6 +471,8 @@ def main(argv: list[str] | None = None) -> int:
         "total_seconds": total_seconds,
         "pages": merged_pages,
     }
+    if args.engine == "gemini":
+        payload["gemini_models"] = args.gemini_models or ""
     ocr_json_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
     if not args.quiet:
