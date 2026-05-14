@@ -20,7 +20,7 @@ pipx install --spec . pdf-doc-extraction-cli   # future, once a console_scripts 
 |---|---|---|
 | `scripts/extract_text.py` | PyMuPDF text extraction → `<stem>.md` + `<stem>.extract.json` | shipped |
 | `scripts/ocr_page.py` | LMStudio OCR for problem pages | shipped |
-| `scripts/ensure_lmstudio.ps1` | PowerShell pre-flight: starts server + loads model | shipped |
+| `scripts/ensure_lmstudio.py` | Cross-shell pre-flight: starts server + loads model (idempotent) | shipped |
 | `scripts/extract_figures.py` | Raster + vector figures into `<stem>.assets/` | planned |
 | `scripts/caption_figure.py` | Vision-model caption per figure | planned |
 | `scripts/assemble_md.py` | Stitch text + OCR + figures + captions | planned |
@@ -37,11 +37,12 @@ Writes `output_dir/<stem>.md` and `output_dir/<stem>.extract.json`. Reads the PD
 
 ### OCR a PDF's problem pages (Phase 2)
 
-PowerShell pre-flight (idempotent — starts the LMStudio server if down,
-loads `glm-ocr` if not already loaded, with a 10-min auto-unload TTL):
+Pre-flight (idempotent — works in any shell; starts the LMStudio server
+if down, loads `glm-ocr` if not already loaded, with a 10-min auto-unload
+TTL):
 
-```powershell
-.\scripts\ensure_lmstudio.ps1
+```bash
+python scripts/ensure_lmstudio.py
 ```
 
 Then OCR:

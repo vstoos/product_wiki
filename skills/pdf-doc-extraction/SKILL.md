@@ -39,7 +39,7 @@ The shape on disk follows the convention already established by upstream extract
 |---|---|---|
 | `scripts/extract_text.py` | shipped | PyMuPDF text extraction → `<stem>.md` + `<stem>.extract.json`. Flags problem pages (text < 100 chars) for a later OCR pass. |
 | `scripts/ocr_page.py` | shipped | LMStudio OCR for problem pages. Reads Phase 1's `<stem>.extract.json`, transcribes flagged pages, writes `<stem>.ocr.json`. Gemini API round-robin is Phase 2b. |
-| `scripts/ensure_lmstudio.ps1` | shipped | PowerShell wrapper that starts the LMStudio server and loads a model if not already loaded. One-liner pre-flight for `ocr_page.py`. |
+| `scripts/ensure_lmstudio.py` | shipped | Cross-shell pre-flight that starts the LMStudio server and loads a model if not already loaded. Idempotent. Wraps `lms` CLI. |
 | `scripts/extract_figures.py` | planned | Raster + vector figures into `<stem>.assets/`. |
 | `scripts/caption_figure.py` | planned | Vision-model caption per figure. Free-tier Gemma 4. |
 | `scripts/assemble_md.py` | planned | Stitch text + OCR + figures + captions into the final `<stem>.md`. |
@@ -80,15 +80,15 @@ Writes `<stem>.md` and `<stem>.extract.json` next to the PDF.
 ### OCR pass (Phase 2)
 
 Requires LMStudio running locally with a vision-capable model loaded
-(default: `glm-ocr`). One-liner pre-flight (PowerShell):
+(default: `glm-ocr`). One-liner pre-flight (any shell):
 
-```powershell
-.\skills\pdf-doc-extraction\scripts\ensure_lmstudio.ps1
+```bash
+python skills/pdf-doc-extraction/scripts/ensure_lmstudio.py
 ```
 
 This starts the server (if down) and loads `glm-ocr` (if not already loaded)
-with a 10-min auto-unload TTL. Override the model with `-Model gemma-4-e2b-it`.
-The script is idempotent.
+with a 10-min auto-unload TTL. Override with `--model gemma-4-e2b-it
+--ttl 1800 --gpu 0.5`. The script is idempotent.
 
 Then OCR:
 
