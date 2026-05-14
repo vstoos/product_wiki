@@ -25,7 +25,8 @@ Phase 2 does NOT modify Phase 1 outputs. The final merged markdown is produced b
 
 - **No PaddleOCR.** Caused Windows / WSL / Docker conflicts in prior work.
 - **No new Python dependencies.** Stdlib `urllib.request` for HTTP, existing `fitz` (PyMuPDF) for page→PNG rendering, existing `pytest` for tests.
-- **Cheap model by default.** `gemma-4-e2b-it` (2B vision) is the default. Escalate only on demonstrated failure.
+- **Cheap, OCR-specialized model by default.** `glm-ocr` (≈2B, OCR-specialized, >150 tps output on user's RTX 3090, few seconds for prompt processing). Escalate only on demonstrated failure. `gemma-4-e2b-it` (2B general vision) is the documented alternative.
+- **One image per request.** Each page is a fresh HTTP POST with its own message array; no conversation context carried between pages. Avoids accidental cross-page contamination and matches LMStudio's per-request prompt-processing cost model.
 - **No live model calls in tests.** All HTTP is mocked.
 - **Don't OCR pages with clean text.** Process only pages from `extract.json::problem_pages`, unless `--pages` overrides.
 - **Don't modify the input PDF or Phase 1 outputs.** All writes go to a new sidecar.
@@ -39,7 +40,7 @@ python skills/pdf-doc-extraction/scripts/ocr_page.py \
   --extract-json <substance>/<AGENCY>/<file>.extract.json \
   --out <substance>/<AGENCY>/ \
   [--engine lmstudio]              # default; only backend in Phase 2
-  [--model gemma-4-e2b-it]         # backend default
+  [--model glm-ocr]         # backend default
   [--host http://localhost:1234]   # LMStudio host
   [--dpi 200]                      # PNG render DPI
   [--pages "3,5,7-9"]              # override problem-page list
@@ -72,7 +73,7 @@ python skills/pdf-doc-extraction/scripts/ocr_page.py \
 {
   "source_file": "SUPPL_011_210951Orig1s011lbl.pdf",
   "engine": "lmstudio",
-  "model": "gemma-4-e2b-it",
+  "model": "glm-ocr",
   "host": "http://localhost:1234",
   "dpi": 200,
   "ocr_date": "2026-05-14T10:23:00Z",
@@ -188,7 +189,7 @@ The model-selection table in `SKILL.md` is updated:
 | Decision | Default | Escalate to | Never |
 |---|---|---|---|
 | Per-page text vs OCR routing | **Haiku** | Sonnet only after Haiku gives clearly wrong output twice | Opus |
-| OCR of scanned pages | **`gemma-4-e2b-it` via LMStudio (2B, vision)** | `gemma-4-e4b-it` (4B) or `glm-ocr-gguf` (specialized) after `e2b` produces clearly wrong output twice | PaddleOCR (Windows hell); paid OCR (Azure DI) only on explicit user request |
+| OCR of scanned pages | **`glm-ocr` via LMStudio (≈2B, OCR-specialized, >150 tps on RTX 3090)** | `gemma-4-e2b-it` (2B general vision) or `gemma-4-e4b-it` (4B) after `glm-ocr` produces clearly wrong output twice | PaddleOCR (Windows hell); paid OCR (Azure DI) only on explicit user request |
 | Vision captions for figures (Phase 3) | **Gemini API round-robin on Gemma 4 (free tier)** OR LMStudio Gemma 4 | Sonnet vision sparingly | Opus vision |
 
 Gemini round-robin is documented as **Phase 2b — planned next**.
@@ -202,7 +203,7 @@ After processing, emit JSON summary on stdout (suppress with `--quiet`):
   "ocr_json": "<path>",
   "pdf": "<path>",
   "engine": "lmstudio",
-  "model": "gemma-4-e2b-it",
+  "model": "glm-ocr",
   "pages_requested": 6,
   "pages_processed": 5,
   "pages_skipped_cached": 1,
