@@ -10,11 +10,13 @@ Usage:
 """
 from __future__ import annotations
 
+import argparse
 import base64
 import json
 import sys
 import time
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 
 import fitz  # PyMuPDF
@@ -214,3 +216,99 @@ def merge_with_cache(*, new_pages: list[dict], cache: dict | None) -> list[dict]
     for p in new_pages:
         by_pn[p["page_number"]] = p
     return [by_pn[pn] for pn in sorted(by_pn)]
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="OCR scanned/problem pages of a PDF via LMStudio."
+    )
+    parser.add_argument("--pdf", type=Path, required=True, help="Input PDF path")
+    parser.add_argument(
+        "--extract-json",
+        type=Path,
+        default=None,
+        help="Phase 1 <stem>.extract.json (used unless --pages given)",
+    )
+    parser.add_argument(
+        "--out",
+        type=Path,
+        required=True,
+        help="Output directory; <stem>.ocr.json is written here",
+    )
+    parser.add_argument(
+        "--engine", default="lmstudio", choices=["lmstudio"],
+        help="OCR backend (only 'lmstudio' in Phase 2)",
+    )
+    parser.add_argument("--model", default="glm-ocr")
+    parser.add_argument("--host", default="http://localhost:1234")
+    parser.add_argument("--dpi", type=int, default=200)
+    parser.add_argument(
+        "--pages",
+        default=None,
+        help="Override problem-page list, e.g. '3,5,7-9'",
+    )
+    parser.add_argument("--force", action="store_true",
+                        help="Reprocess pages even if already cached as ok")
+    parser.add_argument("--timeout", type=int, default=120,
+                        help="Per-page HTTP timeout (seconds)")
+    parser.add_argument("--quiet", action="store_true")
+    args = parser.parse_args(argv)
+
+    args.out.mkdir(parents=True, exist_ok=True)
+    ocr_json_path = args.out / f"{args.pdf.stem}.ocr.json"
+
+    extract_metadata = None
+    if args.extract_json is not None:
+        extract_metadata = json.loads(args.extract_json.read_text(encoding="utf-8"))
+
+    requested = select_pages(pages_spec=args.pages, extract_metadata=extract_metadata)
+    cache = load_existing_cache(ocr_json_path)
+    to_do = pages_to_process(requested=requested, cache=cache, force=args.force)
+
+    t0 = time.monotonic()
+    new_pages = process_pages(
+        pdf_path=args.pdf,
+        page_numbers=to_do,
+        dpi=args.dpi,
+        host=args.host,
+        model=args.model,
+        timeout=args.timeout,
+    )
+    total_seconds = round(time.monotonic() - t0, 3)
+
+    merged_pages = merge_with_cache(new_pages=new_pages, cache=cache)
+    payload = {
+        "source_file": args.pdf.name,
+        "engine": args.engine,
+        "model": args.model,
+        "host": args.host,
+        "dpi": args.dpi,
+        "ocr_date": _utc_now_iso(),
+        "total_seconds": total_seconds,
+        "pages": merged_pages,
+    }
+    ocr_json_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    if not args.quiet:
+        failed = sum(1 for p in new_pages if p["status"] == "error")
+        summary = {
+            "ocr_json": str(ocr_json_path),
+            "pdf": str(args.pdf),
+            "engine": args.engine,
+            "model": args.model,
+            "pages_requested": len(requested),
+            "pages_processed": len(new_pages),
+            "pages_skipped_cached": len(requested) - len(to_do),
+            "pages_failed": failed,
+            "total_seconds": total_seconds,
+        }
+        print(json.dumps(summary, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

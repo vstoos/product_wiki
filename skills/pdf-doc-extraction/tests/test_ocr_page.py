@@ -240,3 +240,102 @@ def test_merge_with_cache_no_cache_returns_new_sorted():
     new = [{"page_number": 7, "text": "b"}, {"page_number": 3, "text": "a"}]
     merged = ocr_page.merge_with_cache(new_pages=new, cache=None)
     assert [p["page_number"] for p in merged] == [3, 7]
+
+
+def test_cli_writes_ocr_json(suppl11_pdf, tmp_path):
+    # Provide a fake extract.json indicating page 1 is a problem page
+    extract_json = tmp_path / f"{suppl11_pdf.stem}.extract.json"
+    extract_json.write_text(_json.dumps({
+        "source_file": suppl11_pdf.name,
+        "problem_pages": [1],
+        "page_count": 35,
+    }))
+
+    body = {"choices": [{"message": {"content": "FAKE OCR TEXT"}}]}
+    with patch("urllib.request.urlopen", return_value=_MockResponse(body)):
+        rc = ocr_page.main([
+            "--pdf", str(suppl11_pdf),
+            "--extract-json", str(extract_json),
+            "--out", str(tmp_path),
+            "--engine", "lmstudio",
+            "--model", "glm-ocr",
+            "--quiet",
+        ])
+    assert rc == 0
+
+    ocr_json_path = tmp_path / f"{suppl11_pdf.stem}.ocr.json"
+    assert ocr_json_path.exists()
+    payload = _json.loads(ocr_json_path.read_text())
+    assert payload["engine"] == "lmstudio"
+    assert payload["model"] == "glm-ocr"
+    assert payload["dpi"] == 200
+    assert len(payload["pages"]) == 1
+    assert payload["pages"][0]["page_number"] == 1
+    assert payload["pages"][0]["status"] == "ok"
+    assert payload["pages"][0]["text"] == "FAKE OCR TEXT"
+    assert "ocr_date" in payload
+    assert "total_seconds" in payload
+
+
+def test_cli_cache_skips_already_ok_pages(suppl11_pdf, tmp_path):
+    # Pre-seed cache with page 1 already ok
+    ocr_json_path = tmp_path / f"{suppl11_pdf.stem}.ocr.json"
+    ocr_json_path.write_text(_json.dumps({
+        "source_file": suppl11_pdf.name,
+        "engine": "lmstudio",
+        "model": "glm-ocr",
+        "host": "http://localhost:1234",
+        "dpi": 200,
+        "pages": [{
+            "page_number": 1, "text": "CACHED", "char_count": 6,
+            "duration_sec": 0.1, "status": "ok",
+        }],
+    }))
+
+    call_count = {"n": 0}
+
+    def fake_urlopen(req, timeout=None):
+        call_count["n"] += 1
+        return _MockResponse({"choices": [{"message": {"content": "FRESH"}}]})
+
+    with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+        rc = ocr_page.main([
+            "--pdf", str(suppl11_pdf),
+            "--pages", "1",
+            "--out", str(tmp_path),
+            "--quiet",
+        ])
+    assert rc == 0
+    assert call_count["n"] == 0  # cache hit, no HTTP call
+
+    payload = _json.loads(ocr_json_path.read_text())
+    assert payload["pages"][0]["text"] == "CACHED"
+
+
+def test_cli_force_reprocesses_cached_page(suppl11_pdf, tmp_path):
+    ocr_json_path = tmp_path / f"{suppl11_pdf.stem}.ocr.json"
+    ocr_json_path.write_text(_json.dumps({
+        "source_file": suppl11_pdf.name,
+        "engine": "lmstudio",
+        "model": "glm-ocr",
+        "host": "http://localhost:1234",
+        "dpi": 200,
+        "pages": [{
+            "page_number": 1, "text": "CACHED", "char_count": 6,
+            "duration_sec": 0.1, "status": "ok",
+        }],
+    }))
+
+    body = {"choices": [{"message": {"content": "FRESH"}}]}
+    with patch("urllib.request.urlopen", return_value=_MockResponse(body)):
+        rc = ocr_page.main([
+            "--pdf", str(suppl11_pdf),
+            "--pages", "1",
+            "--out", str(tmp_path),
+            "--force",
+            "--quiet",
+        ])
+    assert rc == 0
+
+    payload = _json.loads(ocr_json_path.read_text())
+    assert payload["pages"][0]["text"] == "FRESH"
