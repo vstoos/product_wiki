@@ -10,7 +10,10 @@ Usage:
 """
 from __future__ import annotations
 
+import base64
+import json
 import sys
+import urllib.request
 from pathlib import Path
 
 import fitz  # PyMuPDF
@@ -71,3 +74,62 @@ def render_page_png(pdf_path: Path, page_number: int, dpi: int) -> bytes:
         page = doc[page_number - 1]  # 1-indexed -> 0-indexed
         pix = page.get_pixmap(matrix=matrix, alpha=False)
         return pix.tobytes("png")
+
+
+OCR_PROMPT = (
+    "Transcribe all readable text from this document page image.\n"
+    "\n"
+    "Rules:\n"
+    "- Preserve line breaks where they appear meaningful (between paragraphs).\n"
+    "- Preserve tables: HTML <table> if complex (rowspans, nested headers); "
+    "GFM pipe table if simple.\n"
+    "- Preserve special characters literally (degree-sign, mu, plus-minus, "
+    "less-equal, greater-equal, en-dash, em-dash, right-arrow, "
+    "checkbox-checked, checkbox-empty). Do not convert these to words or booleans.\n"
+    "- Preserve redaction markers: (b)(4) stays as (b)(4).\n"
+    "- Do not add commentary, headers, or section labels you cannot see.\n"
+    "- If the page is blank or unreadable, output exactly: [BLANK PAGE]\n"
+)
+
+
+def transcribe_lmstudio(
+    image_png_bytes: bytes,
+    *,
+    host: str,
+    model: str,
+    timeout: int,
+) -> str:
+    """POST the image to a local LMStudio OpenAI-compatible vision endpoint.
+
+    Returns the model's response content, stripped of leading/trailing whitespace.
+    Raises on HTTP errors, network errors, and malformed responses.
+
+    One image per request: no conversation context is carried between pages.
+    """
+    b64 = base64.b64encode(image_png_bytes).decode("ascii")
+    payload = {
+        "model": model,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": OCR_PROMPT},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/png;base64,{b64}"},
+                    },
+                ],
+            }
+        ],
+        "temperature": 0.0,
+        "max_tokens": 4096,
+    }
+    req = urllib.request.Request(
+        url=f"{host.rstrip('/')}/v1/chat/completions",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        body = json.loads(resp.read())
+    return body["choices"][0]["message"]["content"].strip()

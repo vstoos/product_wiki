@@ -66,3 +66,74 @@ def test_render_page_png_returns_png_bytes(suppl11_pdf):
 def test_render_page_png_invalid_page_raises(suppl11_pdf):
     with pytest.raises((IndexError, ValueError)):
         ocr_page.render_page_png(suppl11_pdf, page_number=9999, dpi=150)
+
+
+import json as _json
+from unittest.mock import patch
+
+
+class _MockResponse:
+    """Minimal context-manager response for urlopen."""
+
+    def __init__(self, body_dict, status: int = 200):
+        self._body = _json.dumps(body_dict).encode("utf-8")
+        self.status = status
+
+    def read(self):
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+
+def test_transcribe_lmstudio_sends_vision_payload():
+    captured = {}
+
+    def fake_urlopen(req, timeout=None):
+        captured["url"] = req.full_url
+        captured["body"] = _json.loads(req.data.decode("utf-8"))
+        captured["timeout"] = timeout
+        return _MockResponse({"choices": [{"message": {"content": "TRANSCRIBED"}}]})
+
+    with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+        result = ocr_page.transcribe_lmstudio(
+            b"\x89PNG\r\n\x1a\nFAKEBYTES",
+            host="http://localhost:1234",
+            model="glm-ocr",
+            timeout=60,
+        )
+    assert result == "TRANSCRIBED"
+    assert captured["url"] == "http://localhost:1234/v1/chat/completions"
+    assert captured["timeout"] == 60
+    body = captured["body"]
+    assert body["model"] == "glm-ocr"
+    assert body["temperature"] == 0.0
+    content = body["messages"][0]["content"]
+    types = [item["type"] for item in content]
+    assert "text" in types and "image_url" in types
+    img_item = next(c for c in content if c["type"] == "image_url")
+    assert img_item["image_url"]["url"].startswith("data:image/png;base64,")
+
+
+def test_transcribe_lmstudio_strips_trailing_whitespace():
+    body = {"choices": [{"message": {"content": "  hello world  \n"}}]}
+    with patch("urllib.request.urlopen", return_value=_MockResponse(body)):
+        result = ocr_page.transcribe_lmstudio(
+            b"\x89PNG", host="http://localhost:1234", model="m", timeout=60
+        )
+    assert result == "hello world"
+
+
+def test_transcribe_lmstudio_propagates_http_error():
+    import urllib.error
+    err = urllib.error.HTTPError(
+        url="x", code=503, msg="unavailable", hdrs=None, fp=None
+    )
+    with patch("urllib.request.urlopen", side_effect=err):
+        with pytest.raises(urllib.error.HTTPError):
+            ocr_page.transcribe_lmstudio(
+                b"\x89PNG", host="http://localhost:1234", model="m", timeout=60
+            )
