@@ -14,7 +14,7 @@ Use the cheapest / fastest model that gets the job done. Defaults:
 | Decision | Default model | Escalate to | Never use by default |
 |---|---|---|---|
 | Per-page text vs OCR routing, engine choice, caption-or-skip | **Haiku** | Sonnet only after Haiku gives clearly wrong output twice | Opus |
-| OCR of scanned pages | **`glm-ocr` via LMStudio (≈891M params Q8_0, OCR-specialized, >150 tps on a Mobile RTX 3060 6 GB)** | Gemini API free-tier Gemma models via `--engine gemini` when local is unavailable; or `gemma-4-e2b-it`/`gemma-4-e4b-it` via LMStudio for general vision. | PaddleOCR (Windows hell); paid OCR (Azure DI) only on explicit user request |
+| OCR of scanned pages | **`lightonocr-2-1b-ocr-soup` via LMStudio (1B BF16, OCR-specialized, captures HTML table structure + markdown headers, ~12s/page on Mobile RTX 3060)** | `glm-ocr` (smaller/faster ~9s/page when table structure isn't needed); `deepseek-ocr` (markdown pipe-tables); Gemini API free-tier Gemma models via `--engine gemini` when local is unavailable; `gemma-4-e2b-it`/`gemma-4-e4b-it` via LMStudio for general vision | PaddleOCR (Windows hell); paid OCR (Azure DI) only on explicit user request |
 | Vision captions for figures | **Gemini API round-robin on Gemma 4 models (free tier)** | Sonnet vision sparingly | Opus vision |
 | Heavy synthesis (NOT this skill — wiki only) | n/a | n/a | n/a |
 
@@ -79,16 +79,19 @@ Writes `<stem>.md` and `<stem>.extract.json` next to the PDF.
 
 ### OCR pass (Phase 2)
 
-Requires LMStudio running locally with a vision-capable model loaded
-(default: `glm-ocr`). One-liner pre-flight (any shell):
+Requires the **LM Studio desktop application running first** (the `lms`
+CLI is a thin client over the GUI's background daemon — `lms server start`
+fails if the GUI app isn't launched). Then one-liner pre-flight (any shell):
 
 ```bash
 python skills/pdf-doc-extraction/scripts/ensure_lmstudio.py
 ```
 
-This starts the server (if down) and loads `glm-ocr` (if not already loaded)
-with a 10-min auto-unload TTL. Override with `--model gemma-4-e2b-it
---ttl 1800 --gpu 0.5`. The script is idempotent.
+This starts the server (if down) and loads `lightonocr-2-1b-ocr-soup`
+(default — captures HTML table structure + markdown headers) with a
+10-min auto-unload TTL. Override with `--model glm-ocr` (faster, prose-only)
+or `--model gemma-4-e2b-it`. The script is idempotent and prints a clear
+error if the LM Studio GUI isn't running.
 
 Then OCR:
 

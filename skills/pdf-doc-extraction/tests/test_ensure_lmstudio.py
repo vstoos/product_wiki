@@ -114,6 +114,45 @@ def test_ensure_skips_load_when_model_already_loaded(capsys):
     assert "already loaded" in out
 
 
+def test_ensure_friendly_error_when_gui_not_running(capsys):
+    """When `lms server status` fails because the GUI isn't running, we should
+    print a clear, actionable error instead of a CalledProcessError traceback."""
+
+    def fake_run(cmd, capture_output=True, text=True, check=True):
+        if cmd[:3] == ["lms", "server", "status"]:
+            # Simulate the actual stderr from lms when daemon isn't reachable
+            raise subprocess.CalledProcessError(
+                returncode=1,
+                cmd=cmd,
+                output="",
+                stderr="Waking up LM Studio service...\n"
+                       "Error: Timed out waiting for LM Studio daemon to start.\n",
+            )
+        return _completed()
+
+    with patch("shutil.which", return_value="C:\\fake\\lms.exe"), \
+         patch("subprocess.run", side_effect=fake_run):
+        rc = ensure_lmstudio.ensure(model="lightonocr-2-1b-ocr-soup", gpu="max", ttl=600)
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "LM Studio desktop application" in err
+    assert "Traceback" not in err  # ensure no raw traceback leaks
+
+
+def test_main_default_model_is_lightonocr():
+    """Default --model should be the new winner from the OCR benchmark."""
+    captured = {}
+
+    def fake_ensure(*, model, gpu, ttl):
+        captured["model"] = model
+        return 0
+
+    with patch.object(ensure_lmstudio, "ensure", side_effect=fake_ensure):
+        rc = ensure_lmstudio.main([])
+    assert rc == 0
+    assert captured["model"] == "lightonocr-2-1b-ocr-soup"
+
+
 def test_main_passes_args_through():
     captured = {}
 

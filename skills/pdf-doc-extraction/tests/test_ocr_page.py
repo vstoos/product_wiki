@@ -446,7 +446,7 @@ def test_cli_records_prompt_mode_in_output(suppl11_pdf, tmp_path):
         ])
     assert rc == 0
     payload = _json.loads((tmp_path / f"{suppl11_pdf.stem}.ocr.json").read_text())
-    assert payload["prompt_mode"] == "auto-empty"  # default model is glm-ocr
+    assert payload["prompt_mode"] == "auto-empty"  # default model contains "ocr"
 
 
 # ---- Phase 2b: Gemini fallback ----

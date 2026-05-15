@@ -143,7 +143,7 @@ def process_pages(
     dpi: int,
     engine: str = "lmstudio",
     host: str = "http://localhost:1234",
-    model: str = "glm-ocr",
+    model: str = "lightonocr-2-1b-ocr-soup",
     timeout: int = 120,
     prompt: str = OCR_PROMPT,
     gemini_pairs: list[tuple[str, str]] | None = None,
@@ -254,7 +254,7 @@ def main(argv: list[str] | None = None) -> int:
         "--engine", default="lmstudio", choices=["lmstudio", "gemini"],
         help="OCR backend",
     )
-    parser.add_argument("--model", default="glm-ocr")
+    parser.add_argument("--model", default="lightonocr-2-1b-ocr-soup")
     parser.add_argument("--host", default="http://localhost:1234")
     parser.add_argument("--dpi", type=int, default=200)
     parser.add_argument(
@@ -325,7 +325,7 @@ def main(argv: list[str] | None = None) -> int:
     to_do = pages_to_process(requested=requested, cache=cache, force=args.force)
 
     # For prompt resolution, use the actual model that will receive the request:
-    # - LMStudio engine -> args.model (default glm-ocr)
+    # - LMStudio engine -> args.model (default lightonocr-2-1b-ocr-soup)
     # - Gemini engine   -> first --gemini-models entry (e.g. gemma-3-27b-it)
     prompt_model = (
         gemini_pairs[0][1] if args.engine == "gemini" and gemini_pairs else args.model

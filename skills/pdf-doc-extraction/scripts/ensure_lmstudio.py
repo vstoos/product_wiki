@@ -5,9 +5,14 @@ so it works from any shell (cmd, PowerShell, git-bash) without execution-
 policy friction. Companion to `ocr_page.py`.
 
 Usage:
-  python ensure_lmstudio.py                       # default: glm-ocr, ttl=600s, gpu=max
+  python ensure_lmstudio.py                       # default: lightonocr-2-1b-ocr-soup, ttl=600s, gpu=max
+  python ensure_lmstudio.py --model glm-ocr       # faster but loses table structure
   python ensure_lmstudio.py --model gemma-4-e2b-it
-  python ensure_lmstudio.py --model glm-ocr --ttl 1800 --gpu 0.5
+  python ensure_lmstudio.py --model lightonocr-2-1b-ocr-soup --ttl 1800 --gpu 0.5
+
+Pre-requisite: launch the LM Studio desktop application first. The `lms`
+CLI is a thin client over the GUI's background daemon — `lms server start`
+will fail if the GUI app isn't running.
 
 Requires the `lms` CLI on PATH (LM Studio installs it at
 %USERPROFILE%\\.cache\\lm-studio\\bin\\lms.exe on Windows).
@@ -26,9 +31,32 @@ def _run(cmd: list[str], *, capture: bool = True) -> subprocess.CompletedProcess
     return subprocess.run(cmd, capture_output=capture, text=True, check=True)
 
 
+class LMStudioGUINotRunning(RuntimeError):
+    """The `lms` CLI cannot reach the LM Studio daemon. The desktop GUI app
+    must be running before any `lms` command works — even `lms server start`,
+    which talks to the daemon to bring up the HTTP server."""
+
+
 def is_server_running() -> tuple[bool, int]:
-    """Return (running, port) from `lms server status --json`."""
-    r = _run(["lms", "server", "status", "--json"])
+    """Return (running, port) from `lms server status --json`.
+
+    Raises LMStudioGUINotRunning if the `lms` CLI can't reach the daemon
+    (almost always means the desktop app isn't launched).
+    """
+    try:
+        r = subprocess.run(
+            ["lms", "server", "status", "--json"],
+            capture_output=True, text=True, check=True,
+        )
+    except subprocess.CalledProcessError as e:
+        combined = ((e.stderr or "") + (e.stdout or "")).lower()
+        if "daemon" in combined or "timed out" in combined:
+            raise LMStudioGUINotRunning(
+                "Cannot reach the LM Studio daemon. Launch the LM Studio "
+                "desktop application first (the `lms` CLI is a thin client "
+                "over the GUI's background service), then re-run this script."
+            ) from e
+        raise
     data = json.loads(r.stdout)
     return bool(data.get("running")), int(data.get("port", 0))
 
@@ -71,7 +99,11 @@ def ensure(*, model: str, gpu: str, ttl: int) -> int:
         )
         return 1
 
-    running, port = is_server_running()
+    try:
+        running, port = is_server_running()
+    except LMStudioGUINotRunning as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
     if not running:
         print("Starting LMStudio server...")
         start_server()
@@ -97,7 +129,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Ensure LMStudio server is running and a model is loaded."
     )
-    parser.add_argument("--model", default="glm-ocr")
+    parser.add_argument("--model", default="lightonocr-2-1b-ocr-soup")
     parser.add_argument("--ttl", type=int, default=600,
                         help="Auto-unload after this many seconds idle")
     parser.add_argument("--gpu", default="max",

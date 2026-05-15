@@ -37,9 +37,13 @@ Writes `output_dir/<stem>.md` and `output_dir/<stem>.extract.json`. Reads the PD
 
 ### OCR a PDF's problem pages (Phase 2)
 
-Pre-flight (idempotent — works in any shell; starts the LMStudio server
-if down, loads `glm-ocr` if not already loaded, with a 10-min auto-unload
-TTL):
+**First, launch the LM Studio desktop application.** The `lms` CLI is a
+thin client over the GUI's background daemon — `lms server start` will
+fail with a clear error if the GUI app isn't running.
+
+Then pre-flight (idempotent — works in any shell; starts the server if
+down, loads `lightonocr-2-1b-ocr-soup` if not already loaded, with a
+10-min auto-unload TTL):
 
 ```bash
 python scripts/ensure_lmstudio.py
@@ -54,8 +58,11 @@ python scripts/ocr_page.py \
   --out apalutamide/FDA/
 ```
 
-Default model is `glm-ocr` (≈891M, OCR-specialized). For OCR-specialized
-models the request is image-only (no instruction prompt) — instructions can
+Default model is `lightonocr-2-1b-ocr-soup` (1B BF16, OCR-specialized,
+captures HTML table structure + markdown headers — best for regulatory
+forms). Alternatives: `--model glm-ocr` (faster, prose-only) or
+`--model deepseek-ocr` (markdown pipe-tables). For OCR-specialized models
+the request is image-only (no instruction prompt) — instructions can
 confuse single-task OCR models. General vision models (e.g. `gemma-4-e2b-it`)
 get the full `OCR_PROMPT`. Override with `--prompt "..."`.
 
