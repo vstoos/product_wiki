@@ -280,7 +280,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--api-key", action="append", default=None,
         help="Gemini API key. Repeatable for round-robin across multiple keys. "
-             "If omitted, falls back to GEMINI_API_KEY env var.",
+             "If omitted, falls back to GEMINI_API_KEY or GOOGLE_API_KEY env var.",
     )
     parser.add_argument(
         "--gemini-models",
@@ -296,11 +296,14 @@ def main(argv: list[str] | None = None) -> int:
     gemini_pairs: list[tuple[str, str]] = []
     if args.engine == "gemini":
         keys = list(args.api_key or [])
-        env_key = os.environ.get("GEMINI_API_KEY")
+        # Prefer GEMINI_API_KEY but accept GOOGLE_API_KEY (Google's canonical
+        # name, used by their own SDKs). Either env var works.
+        env_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
         if not keys and env_key:
             keys = [env_key]
         if not keys:
-            print("error: --engine gemini requires --api-key or GEMINI_API_KEY env var",
+            print("error: --engine gemini requires --api-key or "
+                  "GEMINI_API_KEY/GOOGLE_API_KEY env var",
                   file=sys.stderr)
             return 2
         if not args.gemini_models:

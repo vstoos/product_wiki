@@ -602,6 +602,7 @@ def test_cli_gemini_dispatches_to_gemini_backend(suppl11_pdf, tmp_path, monkeypa
 
 def test_cli_gemini_requires_api_key(suppl11_pdf, tmp_path, monkeypatch, capsys):
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
     rc = ocr_page.main([
         "--pdf", str(suppl11_pdf),
         "--pages", "1",
@@ -613,7 +614,50 @@ def test_cli_gemini_requires_api_key(suppl11_pdf, tmp_path, monkeypatch, capsys)
     ])
     assert rc != 0
     err = capsys.readouterr().err
-    assert "GEMINI_API_KEY" in err or "--api-key" in err
+    assert "GEMINI_API_KEY" in err or "GOOGLE_API_KEY" in err or "--api-key" in err
+
+
+def test_cli_gemini_accepts_google_api_key_env(suppl11_pdf, tmp_path, monkeypatch):
+    """GOOGLE_API_KEY should work as a fallback for GEMINI_API_KEY (Google's canonical name)."""
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setenv("GOOGLE_API_KEY", "FROM_GOOGLE_VAR")
+
+    captured_url = {"url": None}
+
+    def fake_urlopen(req, timeout=None):
+        url = req if isinstance(req, str) else req.full_url
+        captured_url["url"] = url
+        if "generativelanguage.googleapis.com" in url:
+            return _MockResponse({"candidates": [{"content": {"parts": [{"text": "X"}]}}]})
+        return _MockResponse({"data": []})
+
+    with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+        rc = ocr_page.main([
+            "--pdf", str(suppl11_pdf),
+            "--pages", "1",
+            "--out", str(tmp_path),
+            "--engine", "gemini",
+            "--gemini-models", "gemma-3-27b-it",
+            "--skip-model-check",
+            "--quiet",
+        ])
+    assert rc == 0
+    assert "key=FROM_GOOGLE_VAR" in captured_url["url"]
+
+
+def test_lmstudio_payload_uses_higher_max_tokens(suppl11_pdf):
+    """max_tokens for LMStudio bumped to 16384 to leave headroom for thinking-token models."""
+    captured = {}
+
+    def fake_urlopen(req, timeout=None):
+        captured["body"] = _json.loads(req.data.decode("utf-8"))
+        return _MockResponse({"choices": [{"message": {"content": "X"}}]})
+
+    with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+        ocr_page.transcribe_lmstudio(
+            b"\x89PNG", host="http://localhost:1234", model="glm-ocr", timeout=60,
+        )
+    assert captured["body"]["max_tokens"] == 16384
 
 
 def test_cli_gemini_requires_models(suppl11_pdf, tmp_path, monkeypatch, capsys):

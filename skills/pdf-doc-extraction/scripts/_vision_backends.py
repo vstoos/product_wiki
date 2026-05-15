@@ -62,7 +62,10 @@ def transcribe_lmstudio(
         "model": model,
         "messages": [{"role": "user", "content": content}],
         "temperature": 0.0,
-        "max_tokens": 4096,
+        # 16384 leaves headroom for OCR-specialized models that internally emit
+        # thinking tokens before the visible transcription. 4096 was hit on long
+        # pages and silently truncated mid-sentence.
+        "max_tokens": 16384,
     }
     req = urllib.request.Request(
         url=f"{host.rstrip('/')}/v1/chat/completions",
