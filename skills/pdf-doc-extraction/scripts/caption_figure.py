@@ -86,6 +86,60 @@ def validate_captioning_model(engine: str, model: str) -> str | None:
     return None
 
 
+def _sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _resolve_pdf_path(sidecar: dict, figures_json_path: Path) -> Path:
+    """Resolve the source PDF path from sidecar metadata, assuming it sits
+    alongside the figures.json."""
+    source_file = sidecar.get("source_file") or ""
+    return figures_json_path.parent / source_file
+
+
+def check_sidecar_freshness(
+    sidecar: dict,
+    *,
+    pdf_path: Path,
+    current_thresholds_hash: str,
+) -> str | None:
+    """Return None if sidecar is fresh; else a human-readable diagnostic.
+
+    Checks:
+      - The source PDF exists at pdf_path
+      - PDF sha256 matches sidecar.source_pdf_sha256
+      - current_thresholds_hash matches sidecar.extractor_thresholds_hash
+
+    A diagnostic is returned (not raised) so the caller can decide whether
+    to refuse, warn, or proceed (--force / --accept-stale).
+    """
+    if not pdf_path.is_file():
+        return f"source PDF missing at {pdf_path} (sidecar expects this file)"
+
+    sidecar_sha = sidecar.get("source_pdf_sha256")
+    if not isinstance(sidecar_sha, str) or len(sidecar_sha) != 64:
+        return "sidecar missing valid source_pdf_sha256"
+    current_sha = _sha256_file(pdf_path)
+    if current_sha != sidecar_sha:
+        return (
+            f"PDF sha256 mismatch: sidecar={sidecar_sha[:12]}... "
+            f"current={current_sha[:12]}... (re-run extract_figures.py)"
+        )
+
+    sidecar_thresh = sidecar.get("extractor_thresholds_hash")
+    if sidecar_thresh != current_thresholds_hash:
+        return (
+            f"thresholds hash mismatch: sidecar={sidecar_thresh!r:.16}... "
+            f"current={current_thresholds_hash[:12]}... (re-run extract_figures.py "
+            f"with the new thresholds, or pass --accept-stale)"
+        )
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     """Implemented in Task 14."""
     raise NotImplementedError("main() implemented in Task 14")

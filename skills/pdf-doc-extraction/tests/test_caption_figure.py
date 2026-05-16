@@ -105,3 +105,59 @@ def test_validate_captioning_model_ignores_engine_gemini():
     assert caption_figure.validate_captioning_model(
         "gemini", "glm-ocr"  # nonsense for gemini but not our concern here
     ) is None
+
+
+# --- check_sidecar_freshness ---
+
+def test_check_sidecar_freshness_passes_when_hashes_match(tmp_path):
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(b"PDF BODY")
+    sidecar = {
+        "source_pdf_sha256": caption_figure._sha256_file(pdf),
+        "extractor_thresholds_hash": "deadbeef" * 8,
+    }
+    assert caption_figure.check_sidecar_freshness(
+        sidecar, pdf_path=pdf, current_thresholds_hash="deadbeef" * 8
+    ) is None
+
+
+def test_check_sidecar_freshness_fails_when_pdf_changed(tmp_path):
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(b"NEW PDF BODY")
+    sidecar = {
+        "source_pdf_sha256": "0" * 64,  # stale
+        "extractor_thresholds_hash": "deadbeef" * 8,
+    }
+    diag = caption_figure.check_sidecar_freshness(
+        sidecar, pdf_path=pdf, current_thresholds_hash="deadbeef" * 8
+    )
+    assert diag is not None
+    assert "sha256" in diag.lower() or "pdf" in diag.lower()
+
+
+def test_check_sidecar_freshness_fails_when_thresholds_differ(tmp_path):
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(b"PDF BODY")
+    sidecar = {
+        "source_pdf_sha256": caption_figure._sha256_file(pdf),
+        "extractor_thresholds_hash": "old" + "0" * 61,
+    }
+    diag = caption_figure.check_sidecar_freshness(
+        sidecar, pdf_path=pdf, current_thresholds_hash="new" + "0" * 61,
+    )
+    assert diag is not None
+    assert "threshold" in diag.lower()
+
+
+def test_check_sidecar_freshness_handles_missing_pdf(tmp_path):
+    """If the source PDF is gone, treat as stale with a clear diagnostic."""
+    pdf = tmp_path / "doc.pdf"  # not created
+    sidecar = {
+        "source_pdf_sha256": "0" * 64,
+        "extractor_thresholds_hash": "deadbeef" * 8,
+    }
+    diag = caption_figure.check_sidecar_freshness(
+        sidecar, pdf_path=pdf, current_thresholds_hash="deadbeef" * 8,
+    )
+    assert diag is not None
+    assert "missing" in diag.lower() or "not found" in diag.lower()
