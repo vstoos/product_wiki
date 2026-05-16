@@ -162,17 +162,126 @@ def test_is_redaction_white_too_bright_negative():
     ) is False
 
 
-# Calibration corpus is seeded post-implementation per spec
-# ("Chicken-and-egg note"). Until then this list is empty.
-KNOWN_REDACTIONS: list[tuple[str, int]] = []
+# Calibration corpus seeded 2026-05-16 from a full apalutamide backfill
+# (40 PDFs, 1418 pages, 1504 figures, 128 redactions detected). Tuples are
+# (agency, filename, page_number). Each is a page with at least one (b)(4)
+# raster redaction at default detector thresholds (stddev_max=15, mean_max=245).
+APALUTAMIDE_DIR = Path(__file__).resolve().parents[3] / "apalutamide"
+KNOWN_REDACTIONS: list[tuple[str, str, int]] = [
+    # FDA NDA cover sheet: one large (~76% page width) horizontal (b)(4) block.
+    ("FDA", "210951Orig1s000ChemR.pdf", 38),
+    # FDA Multidiscipline review: cover-of-the-clinical-review tables with
+    # many small (b)(4) line redactions; pages 5-7 are densely redacted.
+    ("FDA", "210951Orig1s000MultidisciplineR.pdf", 5),
+    ("FDA", "210951Orig1s000MultidisciplineR.pdf", 6),
+    ("FDA", "210951Orig1s000MultidisciplineR.pdf", 7),
+    # FDA label supplement with embedded (b)(4) values scattered throughout.
+    ("FDA", "SUPPL_004_210951s004lbl.pdf", 2),
+    # TGA PI: single mid-page (~34% width) redacted block.
+    ("TGA", "TGA_PI_-_AusPAR__Apalutamide.pdf", 15),
+]
 
 
-@pytest.mark.skipif(not KNOWN_REDACTIONS, reason="KNOWN_REDACTIONS seeded post-implementation")
-def test_is_redaction_against_known_corpus_redactions():
-    """Pin against known (b)(4) pages. Seeded by running extract_figures.py
-    on the apalutamide corpus once and recording observed redactions."""
-    # Future: load page, extract figure at known bbox, assert is_redaction True
-    pass
+@pytest.mark.parametrize("agency,filename,page_number", KNOWN_REDACTIONS)
+def test_is_redaction_against_known_corpus_redactions(agency, filename, page_number):
+    """Re-extract a page from the apalutamide corpus and assert at least one
+    figure is flagged redacted. Locks in (b)(4) detection against silent
+    threshold drift or PyMuPDF rendering changes."""
+    pdf_path = APALUTAMIDE_DIR / agency / filename
+    if not pdf_path.exists():
+        pytest.skip(f"corpus PDF missing: {pdf_path}")
+
+    with fitz.open(pdf_path) as doc:
+        figs, _ = extract_figures.extract_figures_from_page(
+            doc, page_number - 1,
+            header_fraction=0.15,
+            header_min_height=0.08,
+            redaction_thresholds=(15.0, 245.0),
+            min_area_px=400,
+            nearby_text_max_chars=2500,
+        )
+    redacted = [f for f in figs if f.get("redacted")]
+    assert redacted, (
+        f"{filename} p.{page_number}: expected >=1 redacted figure, got "
+        f"{len(figs)} figures with redacted={[f.get('redacted') for f in figs]}"
+    )
+
+
+# Per-source figure-yield baselines seeded 2026-05-16 from the same full backfill.
+# Values are (agency, expected_figures, expected_redacted). Regression test
+# below pins each within +-20% (with a +-2 absolute floor for tiny yields).
+# A drop signals silent under-coverage; a spike signals false-positive surge.
+# Source: <stem>.figures.json sidecars from
+# `extract_figures.py --pdf <p> --out apalutamide/<agency> --quiet` over the
+# full apalutamide corpus.
+COVERAGE_EXPECTATIONS: dict[str, dict] = {
+    # FDA NDA reviews
+    "210951Orig1s000MultidisciplineR.pdf": {"agency": "FDA", "figures": 188, "redacted": 109},
+    "210951Orig1s000ChemR.pdf":            {"agency": "FDA", "figures":  38, "redacted":   1},
+    # FDA labels / PSG / DailyMed
+    "SUPPL_011_210951Orig1s011lbl.pdf":    {"agency": "FDA", "figures":   3, "redacted":   0},
+    "SUPPL_004_210951s004lbl.pdf":         {"agency": "FDA", "figures":  22, "redacted":  17},
+    "DailyMed_label_d1cda4f7-cb33-46ea-b9ac-431f6452b1a5.pdf":
+                                           {"agency": "FDA", "figures":   7, "redacted":   0},
+    "PSG_210951.pdf":                      {"agency": "FDA", "figures":   0, "redacted":   0},
+    # EMA EPAR set (raster-only; EPAR Assessment Report still under-yields
+    # vector plots; Phase 3.1 closes that gap)
+    "Erleada_-_Erleada___EPAR_-_Public_assessment_report.pdf":
+                                           {"agency": "EMA", "figures": 674, "redacted":   0},
+    "Erleada_-_Erleada-H-C-4452-II-0001___EPAR_-_Assessment_Report_-_Variation.pdf":
+                                           {"agency": "EMA", "figures": 400, "redacted":   0},
+    "Erleada_-_Erleada___EPAR_-_Product_information.pdf":
+                                           {"agency": "EMA", "figures":  44, "redacted":   0},
+    "Erleada_-_Erleada-H-C-004452-X-0028-G___EPAR_-_Assessment_report_-_Extension.pdf":
+                                           {"agency": "EMA", "figures":  10, "redacted":   0},
+    # HC Product Monograph
+    "Product_Monograph_-_ERLEADA.pdf":     {"agency": "HC",  "figures":   8, "redacted":   0},
+    # PMDA review
+    "PMDA_Review_Report_-_Erleada__Apalutamide_.pdf":
+                                           {"agency": "PMDA","figures":  14, "redacted":   0},
+    # TGA
+    "TGA_AusPAR_-_AusPAR__Apalutamide.pdf":{"agency": "TGA", "figures":  14, "redacted":   0},
+    "TGA_PI_-_AusPAR__Apalutamide.pdf":    {"agency": "TGA", "figures":   2, "redacted":   1},
+}
+
+
+def _coverage_tolerance(expected: int) -> int:
+    """+-20% with a +-2 absolute floor for tiny yields."""
+    return max(2, int(round(expected * 0.20)))
+
+
+@pytest.mark.parametrize("filename,expected", list(COVERAGE_EXPECTATIONS.items()))
+def test_corpus_figure_yield_within_tolerance(filename, expected):
+    """Pin per-source figure yield to the seeded baseline within +-20%.
+
+    Reads pre-generated sidecars rather than re-extracting (fast). Skips when
+    the sidecar is missing - run `extract_figures.py --pdf <p> --out
+    apalutamide/<agency>` once across the corpus to seed.
+    """
+    sidecar = APALUTAMIDE_DIR / expected["agency"] / f"{Path(filename).stem}.figures.json"
+    if not sidecar.exists():
+        pytest.skip(f"sidecar missing - run extract_figures.py first: {sidecar}")
+
+    payload = json.loads(sidecar.read_text(encoding="utf-8"))
+
+    actual_f = payload["figure_count"]
+    exp_f = expected["figures"]
+    tol_f = _coverage_tolerance(exp_f)
+    assert abs(actual_f - exp_f) <= tol_f, (
+        f"{filename}: figure_count expected {exp_f}+-{tol_f}, got {actual_f}"
+    )
+
+    actual_r = payload["redacted_count"]
+    exp_r = expected["redacted"]
+    if exp_r == 0:
+        assert actual_r == 0, (
+            f"{filename}: expected 0 redactions, got {actual_r} - false-positive surge?"
+        )
+    else:
+        tol_r = _coverage_tolerance(exp_r)
+        assert abs(actual_r - exp_r) <= tol_r, (
+            f"{filename}: redacted_count expected {exp_r}+-{tol_r}, got {actual_r}"
+        )
 
 
 def test_page_text_verbatim_returns_page_get_text():
