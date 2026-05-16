@@ -97,3 +97,136 @@ def test_atomic_write_json_leaves_canonical_intact_on_failure(tmp_path, monkeypa
         vb.atomic_write_json(target, {"replaced": True})
     # Canonical still has original content
     assert json.loads(target.read_text(encoding="utf-8")) == {"original": True}
+
+
+import json as _json
+from unittest.mock import patch
+
+
+class _MockResponse:
+    def __init__(self, body_dict, status: int = 200):
+        self._body = _json.dumps(body_dict).encode("utf-8")
+        self.status = status
+    def read(self):
+        return self._body
+    def __enter__(self):
+        return self
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+
+# --- transcribe_lmstudio_structured ---
+
+def test_lmstudio_structured_returns_parsed_type_and_content():
+    fake_body = {"choices": [{"message": {"content": '{"type":"figure","content":"A PK plot."}'}}]}
+    with patch("urllib.request.urlopen", return_value=_MockResponse(fake_body)):
+        t, c = vb.transcribe_lmstudio_structured(
+            b"\x89PNG\r\n\x1a\nFAKE",
+            host="http://localhost:1234",
+            model="gemma-4-e4b-it",
+            timeout=10,
+            prompt="hello",
+        )
+    assert t == "figure"
+    assert c == "A PK plot."
+
+
+def test_lmstudio_structured_returns_none_on_parse_failure():
+    """Model emitted non-JSON text. Helper returns (None, raw_text), caller decides."""
+    fake_body = {"choices": [{"message": {"content": "This is not JSON, sorry."}}]}
+    with patch("urllib.request.urlopen", return_value=_MockResponse(fake_body)):
+        t, c = vb.transcribe_lmstudio_structured(
+            b"\x89PNG\r\n\x1a\nFAKE",
+            host="http://localhost:1234",
+            model="gemma-4-e4b-it",
+            timeout=10,
+            prompt="hello",
+        )
+    assert t is None
+    assert c == "This is not JSON, sorry."
+
+
+def test_lmstudio_structured_returns_none_on_schema_mismatch():
+    """Valid JSON but missing required keys -> (None, raw)."""
+    fake_body = {"choices": [{"message": {"content": '{"only_one_field":"oops"}'}}]}
+    with patch("urllib.request.urlopen", return_value=_MockResponse(fake_body)):
+        t, c = vb.transcribe_lmstudio_structured(
+            b"\x89PNG\r\n\x1a\nFAKE",
+            host="http://localhost:1234",
+            model="gemma-4-e4b-it",
+            timeout=10,
+            prompt="hello",
+        )
+    assert t is None
+    assert '"only_one_field"' in c
+
+
+def test_lmstudio_structured_strips_markdown_fences():
+    """Common 4B-model failure mode: wraps JSON in ```json fences."""
+    fenced = "```json\n{\"type\":\"figure\",\"content\":\"A plot.\"}\n```"
+    fake_body = {"choices": [{"message": {"content": fenced}}]}
+    with patch("urllib.request.urlopen", return_value=_MockResponse(fake_body)):
+        t, c = vb.transcribe_lmstudio_structured(
+            b"\x89PNG\r\n\x1a\nFAKE",
+            host="http://localhost:1234",
+            model="gemma-4-e4b-it",
+            timeout=10,
+            prompt="hello",
+        )
+    assert t == "figure"
+    assert c == "A plot."
+
+
+def test_lmstudio_structured_sends_json_object_response_format():
+    captured = {}
+    def fake_urlopen(req, timeout=None):
+        captured["body"] = _json.loads(req.data.decode("utf-8"))
+        return _MockResponse({"choices": [{"message": {"content": '{"type":"figure","content":"x"}'}}]})
+    with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+        vb.transcribe_lmstudio_structured(
+            b"FAKE", host="http://localhost:1234", model="gemma-4-e4b-it", timeout=10, prompt="hi",
+        )
+    assert captured["body"].get("response_format") == {"type": "json_object"}
+
+
+# --- transcribe_gemini_structured ---
+
+def test_gemini_structured_returns_parsed_type_and_content():
+    fake_body = {
+        "candidates": [
+            {"content": {"parts": [{"text": '{"type":"table","content":"<table>x</table>"}'}]}}
+        ]
+    }
+    with patch("urllib.request.urlopen", return_value=_MockResponse(fake_body)):
+        t, c = vb.transcribe_gemini_structured(
+            b"FAKE", api_key="K", model="gemma-4-31b-it", timeout=10, prompt="hi",
+        )
+    assert t == "table"
+    assert c == "<table>x</table>"
+
+
+def test_gemini_structured_sends_response_schema():
+    captured = {}
+    def fake_urlopen(req, timeout=None):
+        captured["body"] = _json.loads(req.data.decode("utf-8"))
+        return _MockResponse({"candidates": [{"content": {"parts": [{"text": '{"type":"figure","content":"x"}'}]}}]})
+    with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+        vb.transcribe_gemini_structured(
+            b"FAKE", api_key="K", model="gemma-4-31b-it", timeout=10, prompt="hi",
+        )
+    gen_cfg = captured["body"]["generationConfig"]
+    assert gen_cfg["response_mime_type"] == "application/json"
+    schema = gen_cfg["response_schema"]
+    assert schema["type"] == "object"
+    assert set(schema["properties"].keys()) == {"type", "content"}
+    assert "type" in schema["required"] and "content" in schema["required"]
+
+
+def test_gemini_structured_returns_none_on_parse_failure():
+    fake_body = {"candidates": [{"content": {"parts": [{"text": "not json"}]}}]}
+    with patch("urllib.request.urlopen", return_value=_MockResponse(fake_body)):
+        t, c = vb.transcribe_gemini_structured(
+            b"FAKE", api_key="K", model="gemma-4-31b-it", timeout=10, prompt="hi",
+        )
+    assert t is None
+    assert c == "not json"

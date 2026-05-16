@@ -164,6 +164,123 @@ def transcribe_gemini(
     return text.strip()
 
 
+import re as _re
+
+_JSON_FENCE_RE = _re.compile(r"^```(?:json)?\s*(.*?)\s*```\s*$", _re.DOTALL | _re.IGNORECASE)
+
+
+def _parse_structured_response(raw_text: str) -> tuple[str | None, str]:
+    """Parse a model's text into (type, content) or (None, raw_text) on failure.
+
+    Strips ```json ... ``` fences (common small-model failure mode), then
+    json.loads. Validates {type, content} shape and that type is in
+    {"figure", "table"}. On any failure returns (None, raw_text).
+    """
+    text = raw_text.strip()
+    m = _JSON_FENCE_RE.match(text)
+    if m:
+        text = m.group(1).strip()
+    try:
+        obj = json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        return None, raw_text
+    if not isinstance(obj, dict):
+        return None, raw_text
+    t = obj.get("type")
+    c = obj.get("content")
+    if t not in ("figure", "table") or not isinstance(c, str):
+        return None, raw_text
+    return t, c
+
+
+def transcribe_lmstudio_structured(
+    image_png_bytes: bytes,
+    *,
+    host: str,
+    model: str,
+    timeout: int,
+    prompt: str,
+) -> tuple[str | None, str]:
+    """Structured-output captioning via LMStudio (OpenAI-compat JSON mode).
+
+    Returns (type, content) on a parseable {type, content} response, else
+    (None, raw_text). LMStudio's OpenAI-compat layer supports
+    response_format={"type":"json_object"} but not arbitrary JSON Schema
+    enforcement, so the schema is also stated in the prompt (which is what
+    `prompt` already contains via CAPTION_PROMPT_TEMPLATE).
+    """
+    b64 = base64.b64encode(image_png_bytes).decode("ascii")
+    content = [
+        {"type": "text", "text": prompt},
+        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+    ]
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": content}],
+        "temperature": 0.0,
+        "max_tokens": 16384,
+        "response_format": {"type": "json_object"},
+    }
+    req = urllib.request.Request(
+        url=f"{host.rstrip('/')}/v1/chat/completions",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        body = json.loads(resp.read())
+    raw_text = body["choices"][0]["message"]["content"]
+    return _parse_structured_response(raw_text)
+
+
+def transcribe_gemini_structured(
+    image_png_bytes: bytes,
+    *,
+    api_key: str,
+    model: str,
+    timeout: int,
+    prompt: str,
+) -> tuple[str | None, str]:
+    """Structured-output captioning via Gemini (response_schema enforced).
+
+    Returns (type, content) on parse success, else (None, raw_text).
+    Raises urllib HTTPError on non-2xx (caller handles 429 routing).
+    """
+    b64 = base64.b64encode(image_png_bytes).decode("ascii")
+    parts = [
+        {"text": prompt},
+        {"inline_data": {"mime_type": "image/png", "data": b64}},
+    ]
+    payload = {
+        "contents": [{"parts": parts}],
+        "generationConfig": {
+            "temperature": 0.0,
+            "maxOutputTokens": 4096,
+            "response_mime_type": "application/json",
+            "response_schema": {
+                "type": "object",
+                "properties": {
+                    "type": {"type": "string", "enum": ["figure", "table"]},
+                    "content": {"type": "string"},
+                },
+                "required": ["type", "content"],
+            },
+        },
+    }
+    url = GEMINI_ENDPOINT.format(model=model, api_key=api_key)
+    req = urllib.request.Request(
+        url=url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        body = json.loads(resp.read())
+    out_parts = body["candidates"][0]["content"]["parts"]
+    raw_text = "".join(p.get("text", "") for p in out_parts if "text" in p)
+    return _parse_structured_response(raw_text)
+
+
 def _gemini_with_round_robin(
     image_png_bytes: bytes,
     *,
