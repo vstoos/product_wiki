@@ -251,3 +251,88 @@ def test_nearby_text_truncates_to_max_chars():
         _FakePage(), (50, 200, 550, 600), max_chars=600
     )
     assert len(nearby) <= 600
+
+
+import fitz  # noqa: E402 -- after sys.modules registration above
+
+
+def test_extract_figures_from_page_returns_pair(multidisc_pdf):
+    """Returns (figures, dropped_header_decorations) tuple."""
+    with fitz.open(multidisc_pdf) as doc:
+        out = extract_figures.extract_figures_from_page(
+            doc, 0,
+            header_fraction=0.15,
+            header_min_height=0.08,
+            redaction_thresholds=(15.0, 245.0),
+            min_area_px=400,
+            nearby_text_max_chars=2500,
+        )
+    assert isinstance(out, tuple) and len(out) == 2
+    figures, dropped = out
+    assert isinstance(figures, list)
+    assert isinstance(dropped, list)
+
+
+def test_extract_figures_from_page_attaches_page_text_verbatim_to_every_figure(multidisc_pdf):
+    """If a page has multiple figures, page_text_verbatim is identical across them."""
+    with fitz.open(multidisc_pdf) as doc:
+        page_count = doc.page_count
+        for i in range(min(220, page_count)):
+            figures, _ = extract_figures.extract_figures_from_page(
+                doc, i,
+                header_fraction=0.15,
+                header_min_height=0.08,
+                redaction_thresholds=(15.0, 245.0),
+                min_area_px=400,
+                nearby_text_max_chars=2500,
+            )
+            if len(figures) >= 2:
+                texts = {f["page_text_verbatim"] for f in figures}
+                assert len(texts) == 1, "page_text_verbatim must be shared per page"
+                return
+    pytest.skip("no page with 2+ figures in first 220 pages")
+
+
+def test_extract_figures_from_page_returns_required_keys(multidisc_pdf):
+    """Each figure dict has every key the downstream JSON schema needs."""
+    required = {
+        "page_number", "page_index_within", "bbox_normalized", "image_bytes",
+        "raw_caption_candidate", "nearby_text", "page_text_verbatim",
+        "redacted", "width_px", "height_px", "size_bytes", "extraction_method",
+    }
+    with fitz.open(multidisc_pdf) as doc:
+        for i in range(min(220, doc.page_count)):
+            figures, _ = extract_figures.extract_figures_from_page(
+                doc, i,
+                header_fraction=0.15,
+                header_min_height=0.08,
+                redaction_thresholds=(15.0, 245.0),
+                min_area_px=400,
+                nearby_text_max_chars=2500,
+            )
+            if figures:
+                missing = required - set(figures[0].keys())
+                assert not missing, f"missing keys: {missing}"
+                return
+    pytest.skip("no figures found in first 220 pages of MultidisciplineR")
+
+
+def test_extract_figures_from_page_dropped_decoration_shape(multidisc_pdf):
+    """When the filter drops a candidate, the entry has the documented shape."""
+    with fitz.open(multidisc_pdf) as doc:
+        for i in range(min(220, doc.page_count)):
+            _, dropped = extract_figures.extract_figures_from_page(
+                doc, i,
+                header_fraction=0.15,
+                header_min_height=0.08,
+                redaction_thresholds=(15.0, 245.0),
+                min_area_px=400,
+                nearby_text_max_chars=2500,
+            )
+            if dropped:
+                d = dropped[0]
+                for k in ("page_number", "bbox_normalized", "size_bytes", "reason"):
+                    assert k in d, f"missing dropped-key: {k}"
+                assert d["reason"] == "header_band"
+                return
+    pytest.skip("no header decorations dropped in first 220 pages")

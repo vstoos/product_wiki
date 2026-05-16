@@ -190,6 +190,101 @@ def nearby_text_for_bbox(
     return "".join(out_parts), candidate
 
 
+def extract_figures_from_page(
+    doc,
+    page_index_zero: int,
+    *,
+    header_fraction: float,
+    header_min_height: float,
+    redaction_thresholds: tuple[float, float],
+    min_area_px: int,
+    nearby_text_max_chars: int,
+) -> tuple[list[dict], list[dict]]:
+    """Return (figures, dropped_header_decorations) for one page.
+
+    Each figure dict carries:
+      page_number, page_index_within, bbox_normalized, image_bytes,
+      raw_caption_candidate, nearby_text, page_text_verbatim, redacted,
+      width_px, height_px, size_bytes, extraction_method
+
+    page_text_verbatim is computed once per page and shared across every
+    figure on that page (caller deduplicates).
+
+    Caller is responsible for writing PNGs and computing asset_sha256.
+    """
+    page = doc[page_index_zero]
+    page_w = page.rect.width
+    page_h = page.rect.height
+    stddev_max, mean_max = redaction_thresholds
+    page_text = page_text_verbatim(page)
+
+    figures: list[dict] = []
+    dropped: list[dict] = []
+    image_index = 0
+
+    for img_info in page.get_images(full=True):
+        xref = img_info[0]
+        try:
+            bbox = page.get_image_bbox(img_info)
+        except (ValueError, RuntimeError):
+            continue
+        if bbox.is_empty:
+            continue
+        bbox_norm = (
+            bbox.x0 / page_w,
+            bbox.y0 / page_h,
+            bbox.x1 / page_w,
+            bbox.y1 / page_h,
+        )
+        # Render to PNG once for both header check (size_bytes for audit log)
+        # and for the figure entry itself.
+        try:
+            pix = fitz.Pixmap(doc, xref)
+            png_bytes = pix.tobytes("png")
+        except Exception:  # noqa: BLE001 - skip uncroppable images
+            continue
+
+        if is_header_decoration(
+            bbox_norm, top_fraction=header_fraction, min_height=header_min_height
+        ):
+            dropped.append({
+                "page_number": page_index_zero + 1,
+                "bbox_normalized": [round(v, 4) for v in bbox_norm],
+                "size_bytes": len(png_bytes),
+                "reason": "header_band",
+            })
+            continue
+
+        redacted = is_redaction(
+            png_bytes,
+            stddev_max=stddev_max,
+            mean_max=mean_max,
+            min_area_px=min_area_px,
+        )
+        nearby, candidate = nearby_text_for_bbox(
+            page,
+            (bbox.x0, bbox.y0, bbox.x1, bbox.y1),
+            max_chars=nearby_text_max_chars,
+        )
+        image_index += 1
+        figures.append({
+            "page_number": page_index_zero + 1,
+            "page_index_within": image_index,
+            "bbox_normalized": [round(v, 4) for v in bbox_norm],
+            "image_bytes": png_bytes,
+            "raw_caption_candidate": candidate,
+            "nearby_text": nearby,
+            "page_text_verbatim": page_text,
+            "redacted": redacted,
+            "width_px": pix.width,
+            "height_px": pix.height,
+            "size_bytes": len(png_bytes),
+            "extraction_method": "native_extract_image",
+        })
+
+    return figures, dropped
+
+
 def main(argv: list[str] | None = None) -> int:
     """Stub - populated in Task 10."""
     raise NotImplementedError("main() implemented in Task 10")
