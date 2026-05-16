@@ -336,3 +336,93 @@ def test_extract_figures_from_page_dropped_decoration_shape(multidisc_pdf):
                 assert d["reason"] == "header_band"
                 return
     pytest.skip("no header decorations dropped in first 220 pages")
+
+
+def test_write_figure_assets_writes_non_redacted_pngs(tmp_path):
+    figs = [
+        {
+            "page_number": 47, "page_index_within": 1,
+            "bbox_normalized": [0.1, 0.3, 0.8, 0.6],
+            "image_bytes": b"\x89PNG\r\n\x1a\nFAKE_OK",
+            "raw_caption_candidate": "Figure 2.",
+            "nearby_text": "context",
+            "page_text_verbatim": "Page 47 full text.",
+            "redacted": False,
+            "width_px": 100, "height_px": 80, "size_bytes": 13,
+            "extraction_method": "native_extract_image",
+        },
+        {
+            "page_number": 51, "page_index_within": 1,
+            "bbox_normalized": [0.4, 0.2, 0.7, 0.4],
+            "image_bytes": b"REDACTED-BYTES",
+            "raw_caption_candidate": "(b)(4)",
+            "nearby_text": "",
+            "page_text_verbatim": "Page 51 full text including (b)(4).",
+            "redacted": True,
+            "width_px": 50, "height_px": 30, "size_bytes": 14,
+            "extraction_method": "native_extract_image",
+        },
+    ]
+    assets_dir = tmp_path / "stem.assets"
+    out = extract_figures.write_figure_assets(figs, assets_dir)
+
+    assert len(out) == 2
+    # non-redacted: file written, asset_path set, asset_sha256 set, image_bytes stripped
+    a = out[0]
+    assert a["asset_path"] == "stem.assets/figure_p47_f1.png"
+    assert (assets_dir / "figure_p47_f1.png").exists()
+    assert isinstance(a["asset_sha256"], str) and len(a["asset_sha256"]) == 64
+    assert "image_bytes" not in a
+    assert a["figure_id"] == "p47_f1"
+    assert a["captioner"] is None
+    assert a["description"] is None
+    assert a["content_type"] is None
+    assert a["description_tier"] is None
+    assert a["raw_caption_candidate_tier"] == 1
+    assert a["page_text_verbatim_tier"] == 1
+    assert a["nearby_text_tier"] is None
+    assert a["prompt_hash"] is None
+    assert a["error"] is None
+
+    # redacted: no file, asset_path None, pre-filled redaction values
+    r = out[1]
+    assert r["asset_path"] is None
+    assert not (assets_dir / "figure_p51_f1.png").exists()
+    assert "image_bytes" not in r
+    assert r["redacted"] is True
+    assert r["captioner"] == "skipped:redacted"
+    assert r["description"] == "[REDACTED: (b)(4)]"
+    assert r["content_type"] == "redaction"
+    assert r["description_tier"] is None
+    assert r["raw_caption_candidate_tier"] == 1
+    assert r["page_text_verbatim_tier"] == 1
+    assert r["nearby_text_tier"] is None
+
+
+def test_hash_thresholds_is_deterministic():
+    h1 = extract_figures.hash_thresholds({"a": 1, "b": 2})
+    h2 = extract_figures.hash_thresholds({"b": 2, "a": 1})  # key order irrelevant
+    assert h1 == h2
+    assert isinstance(h1, str) and len(h1) == 64  # sha256 hex
+
+
+def test_hash_thresholds_changes_with_value():
+    h1 = extract_figures.hash_thresholds({"x": 0.15})
+    h2 = extract_figures.hash_thresholds({"x": 0.16})
+    assert h1 != h2
+
+
+def test_compute_pdf_sha256_prefers_meta_json(tmp_path):
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(b"DUMMY PDF")
+    meta = tmp_path / "doc.meta.json"
+    meta.write_text(json.dumps({"sha256": "deadbeef" * 8}), encoding="utf-8")
+    assert extract_figures.compute_pdf_sha256(pdf) == "deadbeef" * 8
+
+
+def test_compute_pdf_sha256_computes_when_meta_absent(tmp_path):
+    import hashlib
+    pdf = tmp_path / "doc.pdf"
+    body = b"REAL CONTENT"
+    pdf.write_bytes(body)
+    assert extract_figures.compute_pdf_sha256(pdf) == hashlib.sha256(body).hexdigest()

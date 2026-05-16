@@ -19,9 +19,11 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
@@ -283,6 +285,90 @@ def extract_figures_from_page(
         })
 
     return figures, dropped
+
+
+def hash_thresholds(thresholds: dict) -> str:
+    """SHA-256 hex of a JSON-canonical thresholds dict (key-order invariant)."""
+    canon = json.dumps(thresholds, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(canon).hexdigest()
+
+
+def compute_pdf_sha256(pdf_path: Path) -> str:
+    """Prefer <stem>.meta.json::sha256 if present (cheap); else hash the PDF."""
+    pdf_path = Path(pdf_path)
+    # Phase 1's convention is unclear: try both <stem>.pdf.meta.json AND
+    # <stem>.meta.json (stripping .pdf). Order matches the more-specific name first.
+    candidates = [
+        pdf_path.with_suffix(pdf_path.suffix + ".meta.json"),
+        pdf_path.with_suffix(".meta.json"),
+    ]
+    for c in candidates:
+        if c.is_file():
+            try:
+                meta_obj = json.loads(c.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                continue
+            sha = meta_obj.get("sha256")
+            if isinstance(sha, str) and len(sha) == 64:
+                return sha
+    h = hashlib.sha256()
+    with pdf_path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def write_figure_assets(figures: list[dict], assets_dir: Path) -> list[dict]:
+    """Write non-redacted PNGs to assets_dir and return enriched JSON-safe dicts.
+
+    Returns a new list with image_bytes stripped and these fields populated:
+      - figure_id: pN_fM
+      - asset_path: <assets_dir.name>/figure_pN_fM.png (or None if redacted)
+      - asset_sha256: sha256 of the PNG bytes (or None if redacted)
+      - raw_caption_candidate_tier: 1
+      - page_text_verbatim_tier: 1
+      - nearby_text_tier: None (captioner-context only)
+      - captioner / description / content_type / description_tier: pre-filled
+        for redactions, None otherwise (captioner fills in later).
+      - prompt_hash: None
+      - error: None
+
+    Filenames: figure_pN_fM.png.
+    """
+    assets_dir = Path(assets_dir)
+    has_real = any(not f.get("redacted") for f in figures)
+    if has_real:
+        assets_dir.mkdir(parents=True, exist_ok=True)
+
+    out: list[dict] = []
+    for f in figures:
+        entry = {k: v for k, v in f.items() if k != "image_bytes"}
+        entry["figure_id"] = f"p{f['page_number']}_f{f['page_index_within']}"
+        # Tier markers per the spec sentinel convention
+        entry["raw_caption_candidate_tier"] = 1
+        entry["page_text_verbatim_tier"] = 1
+        entry["nearby_text_tier"] = None
+        entry["prompt_hash"] = None
+        entry["error"] = None
+
+        if f.get("redacted"):
+            entry["asset_path"] = None
+            entry["asset_sha256"] = None
+            entry["captioner"] = "skipped:redacted"
+            entry["description"] = "[REDACTED: (b)(4)]"
+            entry["content_type"] = "redaction"
+            entry["description_tier"] = None
+        else:
+            fname = f"figure_p{f['page_number']}_f{f['page_index_within']}.png"
+            (assets_dir / fname).write_bytes(f["image_bytes"])
+            entry["asset_path"] = f"{assets_dir.name}/{fname}"
+            entry["asset_sha256"] = hashlib.sha256(f["image_bytes"]).hexdigest()
+            entry["captioner"] = None
+            entry["description"] = None
+            entry["content_type"] = None
+            entry["description_tier"] = None  # captioner sets to 2 on success
+        out.append(entry)
+    return out
 
 
 def main(argv: list[str] | None = None) -> int:
