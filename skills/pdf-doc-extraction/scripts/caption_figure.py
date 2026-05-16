@@ -140,6 +140,210 @@ def check_sidecar_freshness(
     return None
 
 
+def _gemini_with_round_robin_structured(
+    image_png_bytes: bytes,
+    *,
+    pairs: list[tuple[str, str]],
+    timeout: int,
+    prompt: str,
+) -> tuple[str | None, str, str]:
+    """Round-robin gemini pairs in structured-output mode.
+
+    Returns (type, content, used_model). Advances pairs on HTTP 429; on
+    every-pair-exhausted raises RuntimeError. Local copy (not re-export)
+    so patch.object(caption_figure, 'transcribe_gemini_structured')
+    intercepts cleanly in tests.
+    """
+    last_429: Exception | None = None
+    for api_key, model in pairs:
+        try:
+            t, c = transcribe_gemini_structured(
+                image_png_bytes,
+                api_key=api_key,
+                model=model,
+                timeout=timeout,
+                prompt=prompt,
+            )
+            return t, c, model
+        except urllib.error.HTTPError as e:
+            if e.code == 429:
+                last_429 = e
+                continue
+            raise
+    raise RuntimeError(
+        f"all gemini (api_key, model) pairs returned 429 ({len(pairs)} tried)"
+    ) from last_429
+
+
+def _utc_today() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def caption_one_figure(
+    figure_entry: dict,
+    *,
+    assets_root: Path,
+    substance: str | None,
+    engine: str,
+    backend_kwargs: dict,
+) -> dict:
+    """Caption one figure. Returns a NEW dict (does not mutate input).
+
+    For redacted figures: returns the entry unchanged (already pre-filled
+    by write_figure_assets). No HTTP call.
+
+    For real figures: reads the PNG, renders the prompt, calls the
+    structured-output backend, populates description/content_type/
+    captioner/prompt_hash/description_tier/error.
+
+    Per-figure error containment (no exception escapes).
+    """
+    out = dict(figure_entry)
+    if out.get("redacted"):
+        return out
+
+    asset_rel = out.get("asset_path")
+    if not asset_rel:
+        out["content_type"] = "error"
+        out["description"] = ""
+        out["description_tier"] = None
+        out["error"] = "missing asset_path on non-redacted figure"
+        out["captioner"] = f"{engine}:skipped:no_asset"
+        return out
+
+    image_path = assets_root / asset_rel
+    try:
+        image_bytes = image_path.read_bytes()
+    except OSError as e:
+        out["content_type"] = "error"
+        out["description"] = ""
+        out["description_tier"] = None
+        out["error"] = f"could not read {image_path}: {e}"
+        out["captioner"] = f"{engine}:skipped:read_error"
+        return out
+
+    prompt = render_prompt(
+        substance=substance,
+        nearby_text=out.get("nearby_text", "") or "",
+        raw_caption_candidate=out.get("raw_caption_candidate", "") or "",
+    )
+    p_hash = compute_prompt_hash(prompt)
+    out["prompt_hash"] = p_hash
+    today = _utc_today()
+
+    try:
+        if engine == "lmstudio":
+            model = backend_kwargs["model"]
+            t, c = transcribe_lmstudio_structured(
+                image_bytes,
+                host=backend_kwargs["host"],
+                model=model,
+                timeout=backend_kwargs["timeout"],
+                prompt=prompt,
+            )
+            used_model = model
+        elif engine == "gemini":
+            pairs = backend_kwargs["pairs"]
+            t, c, used_model = _gemini_with_round_robin_structured(
+                image_bytes,
+                pairs=pairs,
+                timeout=backend_kwargs["timeout"],
+                prompt=prompt,
+            )
+        else:
+            raise ValueError(f"unknown engine {engine!r}")
+    except Exception as e:  # noqa: BLE001 - per-figure containment
+        out["content_type"] = "error"
+        out["description"] = ""
+        out["description_tier"] = None
+        out["error"] = f"{type(e).__name__}: {e}"
+        out["captioner"] = f"{engine}:error"
+        return out
+
+    if t is None:
+        out["content_type"] = "error"
+        out["description"] = ""
+        out["description_tier"] = None
+        # Truncate raw text for the error string to keep JSON manageable
+        preview = (c or "")[:200].replace("\n", " ")
+        out["error"] = f"structured-output parse failed: {preview!r}"
+        out["captioner"] = f"{engine}:parse_error"
+        return out
+
+    out["description"] = c
+    out["content_type"] = t  # 'figure' or 'table'
+    out["description_tier"] = 2
+    out["captioner"] = f"{engine}:{used_model}@{today}"
+    return out
+
+
+def process_figures(
+    figures: list[dict],
+    *,
+    assets_root: Path,
+    substance: str | None,
+    engine: str,
+    backend_kwargs: dict,
+    force: bool,
+    rate_budget_calls: int | None,
+) -> tuple[list[dict], dict]:
+    """Caption every figure. Skip already-done unless force; honour budget cap.
+
+    Stats:
+      captioned        - successful new captions written this run
+      skipped_done     - figures already had a description (and force=False)
+      errored          - figures whose content_type became 'error' this run
+      skipped_redacted - figures pre-filled with redaction marker (no call)
+      budget_exhausted - True iff rate_budget_calls was hit
+    """
+    out: list[dict] = []
+    stats = {
+        "captioned": 0,
+        "skipped_done": 0,
+        "errored": 0,
+        "skipped_redacted": 0,
+        "budget_exhausted": False,
+    }
+    calls_made = 0
+    for f in figures:
+        if f.get("redacted"):
+            out.append(dict(f))
+            stats["skipped_redacted"] += 1
+            continue
+        already_done = (
+            f.get("captioner") not in (None, "")
+            and f.get("description") not in (None, "")
+            and f.get("content_type") not in (None, "", "error")
+        )
+        if already_done and not force:
+            out.append(dict(f))
+            stats["skipped_done"] += 1
+            continue
+        if rate_budget_calls is not None and calls_made >= rate_budget_calls:
+            # Budget hit. Pass through remaining figures unchanged.
+            out.append(dict(f))
+            stats["budget_exhausted"] = True
+            continue
+        new_entry = caption_one_figure(
+            f,
+            assets_root=assets_root,
+            substance=substance,
+            engine=engine,
+            backend_kwargs=backend_kwargs,
+        )
+        calls_made += 1
+        out.append(new_entry)
+        if new_entry.get("content_type") == "error":
+            stats["errored"] += 1
+        else:
+            stats["captioned"] += 1
+    return out, stats
+
+
 def main(argv: list[str] | None = None) -> int:
     """Implemented in Task 14."""
     raise NotImplementedError("main() implemented in Task 14")

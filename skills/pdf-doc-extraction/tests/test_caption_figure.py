@@ -161,3 +161,246 @@ def test_check_sidecar_freshness_handles_missing_pdf(tmp_path):
     )
     assert diag is not None
     assert "missing" in diag.lower() or "not found" in diag.lower()
+
+
+def _seed_assets(tmp_path: Path) -> Path:
+    """Create a minimal assets dir with one PNG."""
+    assets = tmp_path / "stem.assets"
+    assets.mkdir(parents=True)
+    (assets / "figure_p1_f1.png").write_bytes(b"\x89PNG\r\n\x1a\nFAKE")
+    return tmp_path
+
+
+def _make_figure(asset_rel: str | None, *, redacted: bool = False,
+                 captioner: str | None = None,
+                 description: str | None = None) -> dict:
+    return {
+        "figure_id": "p1_f1",
+        "page_number": 1,
+        "page_index_within": 1,
+        "asset_path": asset_rel,
+        "asset_sha256": "x" * 64 if asset_rel else None,
+        "bbox_normalized": [0.1, 0.2, 0.8, 0.6],
+        "extraction_method": "native_extract_image",
+        "size_bytes": 16,
+        "width_px": 100,
+        "height_px": 80,
+        "raw_caption_candidate": "Figure 1." if not redacted else "(b)(4)",
+        "raw_caption_candidate_tier": 1,
+        "page_text_verbatim": "Page 1 full text.",
+        "page_text_verbatim_tier": 1,
+        "nearby_text": "context" if not redacted else "",
+        "nearby_text_tier": None,
+        "redacted": redacted,
+        "captioner": captioner,
+        "prompt_hash": None,
+        "description": description,
+        "description_tier": 2 if description and not redacted else None,
+        "content_type": ("redaction" if redacted else
+                         ("figure" if description else None)),
+        "error": None,
+    }
+
+
+def test_caption_one_figure_skips_redacted(tmp_path):
+    root = _seed_assets(tmp_path)
+    fig = _make_figure(None, redacted=True,
+                       captioner="skipped:redacted",
+                       description="[REDACTED: (b)(4)]")
+    fig["content_type"] = "redaction"
+    with patch("urllib.request.urlopen") as urlopen:
+        out = caption_figure.caption_one_figure(
+            fig,
+            assets_root=root,
+            substance="apalutamide",
+            engine="gemini",
+            backend_kwargs={"pairs": [("k", "m")], "timeout": 10},
+        )
+        assert urlopen.call_count == 0
+    assert out["description"] == "[REDACTED: (b)(4)]"
+    assert out["content_type"] == "redaction"
+
+
+def test_caption_one_figure_lmstudio_structured_success(tmp_path):
+    root = _seed_assets(tmp_path)
+    fig = _make_figure("stem.assets/figure_p1_f1.png")
+    with patch.object(caption_figure, "transcribe_lmstudio_structured",
+                      return_value=("figure", "A PK plot.")):
+        out = caption_figure.caption_one_figure(
+            fig, assets_root=root, substance="apalutamide",
+            engine="lmstudio",
+            backend_kwargs={"host": "http://localhost:1234", "model": "gemma-4-e4b-it", "timeout": 60},
+        )
+    assert out["description"] == "A PK plot."
+    assert out["content_type"] == "figure"
+    assert out["description_tier"] == 2
+    assert out["captioner"].startswith("lmstudio:gemma-4-e4b-it@")
+    assert isinstance(out["prompt_hash"], str) and len(out["prompt_hash"]) == 16
+
+
+def test_caption_one_figure_gemini_table_success(tmp_path):
+    root = _seed_assets(tmp_path)
+    fig = _make_figure("stem.assets/figure_p1_f1.png")
+    with patch.object(caption_figure, "transcribe_gemini_structured",
+                      return_value=("table", "<table><tr><td>x</td></tr></table>")):
+        out = caption_figure.caption_one_figure(
+            fig, assets_root=root, substance="apalutamide",
+            engine="gemini",
+            backend_kwargs={"pairs": [("K1", "gemma-4-31b-it")], "timeout": 60},
+        )
+    assert out["content_type"] == "table"
+    assert out["description"].startswith("<table")
+    assert out["description_tier"] == 2
+    assert out["captioner"].startswith("gemini:gemma-4-31b-it@")
+
+
+def test_caption_one_figure_records_parse_error(tmp_path):
+    root = _seed_assets(tmp_path)
+    fig = _make_figure("stem.assets/figure_p1_f1.png")
+    with patch.object(caption_figure, "transcribe_gemini_structured",
+                      return_value=(None, "not json sorry")):
+        out = caption_figure.caption_one_figure(
+            fig, assets_root=root, substance="apalutamide",
+            engine="gemini",
+            backend_kwargs={"pairs": [("K1", "gemma-4-31b-it")], "timeout": 60},
+        )
+    assert out["content_type"] == "error"
+    assert "parse" in out["error"].lower()
+    assert out["description"] == ""
+    assert out["description_tier"] is None
+
+
+def test_caption_one_figure_records_http_error(tmp_path):
+    root = _seed_assets(tmp_path)
+    fig = _make_figure("stem.assets/figure_p1_f1.png")
+    def boom(*a, **kw):
+        raise RuntimeError("HTTPError 500")
+    with patch.object(caption_figure, "transcribe_gemini_structured", side_effect=boom):
+        out = caption_figure.caption_one_figure(
+            fig, assets_root=root, substance="apalutamide",
+            engine="gemini",
+            backend_kwargs={"pairs": [("K1", "gemma-4-31b-it")], "timeout": 60},
+        )
+    assert out["content_type"] == "error"
+    assert "HTTPError" in out["error"]
+
+
+def test_caption_one_figure_gemini_round_robin_advances_on_429(tmp_path):
+    """First pair 429s; second pair succeeds. caption_one_figure must not error."""
+    import urllib.error
+    root = _seed_assets(tmp_path)
+    fig = _make_figure("stem.assets/figure_p1_f1.png")
+    calls: list[tuple[str, str]] = []
+    def fake(image_png_bytes, *, api_key, model, timeout, prompt):
+        calls.append((api_key, model))
+        if api_key == "K1":
+            raise urllib.error.HTTPError(
+                url="http://x", code=429, msg="rate", hdrs=None, fp=None,
+            )
+        return ("figure", "A plot.")
+    with patch.object(caption_figure, "transcribe_gemini_structured", side_effect=fake):
+        out = caption_figure.caption_one_figure(
+            fig, assets_root=root, substance="apalutamide",
+            engine="gemini",
+            backend_kwargs={
+                "pairs": [("K1", "m1"), ("K2", "m2")],
+                "timeout": 60,
+            },
+        )
+    assert calls == [("K1", "m1"), ("K2", "m2")]
+    assert out["content_type"] == "figure"
+
+
+def test_process_figures_skips_already_captioned(tmp_path):
+    root = _seed_assets(tmp_path)
+    figs = [_make_figure("stem.assets/figure_p1_f1.png",
+                         captioner="gemini:gemma-4-31b-it@2026-05-15",
+                         description="Existing caption.")]
+    with patch.object(caption_figure, "transcribe_gemini_structured") as gem:
+        out, stats = caption_figure.process_figures(
+            figs, assets_root=root, substance="apalutamide",
+            engine="gemini",
+            backend_kwargs={"pairs": [("K", "m")], "timeout": 10},
+            force=False, rate_budget_calls=None,
+        )
+        assert gem.call_count == 0
+    assert out[0]["description"] == "Existing caption."
+    assert stats["captioned"] == 0
+    assert stats["skipped_done"] == 1
+
+
+def test_process_figures_force_recaptions(tmp_path):
+    root = _seed_assets(tmp_path)
+    figs = [_make_figure("stem.assets/figure_p1_f1.png",
+                         captioner="gemini:gemma-4-31b-it@2026-05-15",
+                         description="Stale.")]
+    with patch.object(caption_figure, "transcribe_gemini_structured",
+                      return_value=("figure", "Fresh.")):
+        out, stats = caption_figure.process_figures(
+            figs, assets_root=root, substance="apalutamide",
+            engine="gemini",
+            backend_kwargs={"pairs": [("K", "gemma-4-31b-it")], "timeout": 10},
+            force=True, rate_budget_calls=None,
+        )
+    assert out[0]["description"] == "Fresh."
+    assert stats["captioned"] == 1
+
+
+def test_process_figures_rate_budget_stops_after_n(tmp_path):
+    root = _seed_assets(tmp_path)
+    figs = [_make_figure(f"stem.assets/figure_p{i}_f1.png") for i in range(1, 6)]
+    # Seed extra PNGs
+    for i in range(2, 6):
+        (root / "stem.assets" / f"figure_p{i}_f1.png").write_bytes(b"\x89PNG\r\n\x1a\nF")
+        figs[i - 1]["figure_id"] = f"p{i}_f1"
+        figs[i - 1]["page_number"] = i
+
+    call_count = {"n": 0}
+    def fake(image_png_bytes, *, api_key, model, timeout, prompt):
+        call_count["n"] += 1
+        return ("figure", f"caption {call_count['n']}")
+
+    with patch.object(caption_figure, "transcribe_gemini_structured", side_effect=fake):
+        out, stats = caption_figure.process_figures(
+            figs, assets_root=root, substance="apalutamide",
+            engine="gemini",
+            backend_kwargs={"pairs": [("K", "m")], "timeout": 10},
+            force=False, rate_budget_calls=3,
+        )
+    assert call_count["n"] == 3
+    assert stats["budget_exhausted"] is True
+    # First three are captioned; last two left untouched
+    assert sum(1 for f in out if f.get("description")) == 3
+
+
+def test_process_figures_resume_after_budget(tmp_path):
+    """Re-run with same figures (3 already done) plus remaining budget completes the rest."""
+    root = _seed_assets(tmp_path)
+    figs = [_make_figure(f"stem.assets/figure_p{i}_f1.png") for i in range(1, 6)]
+    for i in range(2, 6):
+        (root / "stem.assets" / f"figure_p{i}_f1.png").write_bytes(b"\x89PNG\r\n\x1a\nF")
+        figs[i - 1]["figure_id"] = f"p{i}_f1"
+        figs[i - 1]["page_number"] = i
+    # Pre-mark figures 1-3 as already captioned
+    for f in figs[:3]:
+        f["captioner"] = "gemini:gemma-4-31b-it@2026-05-15"
+        f["description"] = "done earlier"
+        f["content_type"] = "figure"
+        f["description_tier"] = 2
+
+    call_count = {"n": 0}
+    def fake(image_png_bytes, *, api_key, model, timeout, prompt):
+        call_count["n"] += 1
+        return ("figure", f"resumed {call_count['n']}")
+
+    with patch.object(caption_figure, "transcribe_gemini_structured", side_effect=fake):
+        out, stats = caption_figure.process_figures(
+            figs, assets_root=root, substance="apalutamide",
+            engine="gemini",
+            backend_kwargs={"pairs": [("K", "m")], "timeout": 10},
+            force=False, rate_budget_calls=None,
+        )
+    assert call_count["n"] == 2  # only the two unfinished figures
+    assert stats["captioned"] == 2
+    assert stats["skipped_done"] == 3
+    assert all(f["description"] for f in out)
