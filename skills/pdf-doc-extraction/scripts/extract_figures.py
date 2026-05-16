@@ -68,6 +68,22 @@ def infer_substance(pdf_path: Path) -> tuple[str | None, str]:
     return None, "none"
 
 
+def is_header_decoration(
+    bbox_norm: tuple[float, float, float, float],
+    *,
+    top_fraction: float,
+    min_height: float,
+) -> bool:
+    """True if bbox is in the top band AND short enough to be a logo/banner.
+
+    bbox_norm is (x0, y0, x1, y1) with all coordinates in [0, 1] relative
+    to page width/height. Origin is top-left (PyMuPDF convention).
+    """
+    _, y0, _, y1 = bbox_norm
+    height = y1 - y0
+    return y0 < top_fraction and height < min_height
+
+
 def main(argv: list[str] | None = None) -> int:
     """Stub - populated in Task 10."""
     raise NotImplementedError("main() implemented in Task 10")

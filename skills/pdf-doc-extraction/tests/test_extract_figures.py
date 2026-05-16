@@ -79,3 +79,35 @@ def test_infer_substance_path_uses_recognized_agency_dirs():
     name, source = extract_figures.infer_substance(p)
     assert name == "roxadustat"
     assert source == "path_inference"
+
+
+def test_is_header_decoration_top_band_short():
+    """Bbox in top 5% with 5% height -> agency logo, drop."""
+    bbox = (0.10, 0.02, 0.30, 0.07)
+    assert extract_figures.is_header_decoration(
+        bbox, top_fraction=0.15, min_height=0.08
+    ) is True
+
+
+def test_is_header_decoration_below_band():
+    """Bbox in middle of page -> keep."""
+    bbox = (0.10, 0.40, 0.50, 0.70)
+    assert extract_figures.is_header_decoration(
+        bbox, top_fraction=0.15, min_height=0.08
+    ) is False
+
+
+def test_is_header_decoration_top_but_tall():
+    """Bbox starts near top but is tall (real figure spanning header zone) -> keep."""
+    bbox = (0.10, 0.05, 0.50, 0.40)
+    assert extract_figures.is_header_decoration(
+        bbox, top_fraction=0.15, min_height=0.08
+    ) is False
+
+
+def test_is_header_decoration_below_top_band_but_short():
+    """Below top band but short -> keep (not a logo, just a small figure)."""
+    bbox = (0.10, 0.30, 0.30, 0.34)
+    assert extract_figures.is_header_decoration(
+        bbox, top_fraction=0.15, min_height=0.08
+    ) is False
