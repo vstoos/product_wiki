@@ -84,6 +84,45 @@ def is_header_decoration(
     return y0 < top_fraction and height < min_height
 
 
+def is_redaction(
+    image_png_bytes: bytes,
+    *,
+    stddev_max: float,
+    mean_max: float,
+    min_area_px: int,
+) -> bool:
+    """True if the image looks like an FOI (b)(4) gray-fill redaction.
+
+    Computes mean + std-dev across raw pixel bytes (no PIL dep). FDA (b)(4)
+    redactions are typically gray rectangles with very low variance; we
+    require all of:
+      - pixel area >= min_area_px (avoid flagging tiny icons)
+      - per-channel std-dev < stddev_max (uniform fill)
+      - per-channel mean < mean_max (not a white page-background tile)
+
+    Uses fitz.Pixmap to decode bytes -> raw RGB samples. Non-(b)(4)
+    redactions (white-fill, bordered) are NOT covered in v1 - see spec
+    Non-goals section (Phase 3.2).
+    """
+    pix = fitz.Pixmap(image_png_bytes)
+    area = pix.width * pix.height
+    if area < min_area_px:
+        return False
+    samples = pix.samples
+    if len(samples) == 0:
+        return False
+    total = 0
+    sq = 0
+    for b in samples:
+        total += b
+        sq += b * b
+    count = len(samples)
+    mean = total / count
+    var = max(0.0, sq / count - mean * mean)
+    stddev = var ** 0.5
+    return stddev < stddev_max and mean < mean_max
+
+
 def main(argv: list[str] | None = None) -> int:
     """Stub - populated in Task 10."""
     raise NotImplementedError("main() implemented in Task 10")

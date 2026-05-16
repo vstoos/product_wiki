@@ -111,3 +111,65 @@ def test_is_header_decoration_below_top_band_but_short():
     assert extract_figures.is_header_decoration(
         bbox, top_fraction=0.15, min_height=0.08
     ) is False
+
+
+def _make_uniform_png(width: int, height: int, gray_level: int) -> bytes:
+    """Synthesize a uniform-gray PNG via fitz.Pixmap (no PIL dep)."""
+    import fitz
+    pix = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, width, height))
+    pix.set_rect(pix.irect, (gray_level, gray_level, gray_level))
+    return pix.tobytes("png")
+
+
+def _make_noisy_png(width: int, height: int) -> bytes:
+    """Synthesize a high-variance PNG (chequerboard)."""
+    import fitz
+    pix = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, width, height))
+    for y in range(height):
+        for x in range(width):
+            v = 255 if (x // 4 + y // 4) % 2 == 0 else 0
+            pix.set_pixel(x, y, (v, v, v))
+    return pix.tobytes("png")
+
+
+def test_is_redaction_uniform_gray():
+    png = _make_uniform_png(40, 40, gray_level=200)
+    assert extract_figures.is_redaction(
+        png, stddev_max=15, mean_max=245, min_area_px=400
+    ) is True
+
+
+def test_is_redaction_real_figure_negative():
+    png = _make_noisy_png(40, 40)
+    assert extract_figures.is_redaction(
+        png, stddev_max=15, mean_max=245, min_area_px=400
+    ) is False
+
+
+def test_is_redaction_too_small_negative():
+    """Below min_area_px: don't flag (could be a tiny icon)."""
+    png = _make_uniform_png(10, 10, gray_level=200)  # 100 < 400
+    assert extract_figures.is_redaction(
+        png, stddev_max=15, mean_max=245, min_area_px=400
+    ) is False
+
+
+def test_is_redaction_white_too_bright_negative():
+    """Pure white = page background, not a redaction."""
+    png = _make_uniform_png(40, 40, gray_level=255)
+    assert extract_figures.is_redaction(
+        png, stddev_max=15, mean_max=245, min_area_px=400
+    ) is False
+
+
+# Calibration corpus is seeded post-implementation per spec
+# ("Chicken-and-egg note"). Until then this list is empty.
+KNOWN_REDACTIONS: list[tuple[str, int]] = []
+
+
+@pytest.mark.skipif(not KNOWN_REDACTIONS, reason="KNOWN_REDACTIONS seeded post-implementation")
+def test_is_redaction_against_known_corpus_redactions():
+    """Pin against known (b)(4) pages. Seeded by running extract_figures.py
+    on the apalutamide corpus once and recording observed redactions."""
+    # Future: load page, extract figure at known bbox, assert is_redaction True
+    pass
