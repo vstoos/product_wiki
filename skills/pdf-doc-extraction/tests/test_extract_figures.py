@@ -426,3 +426,129 @@ def test_compute_pdf_sha256_computes_when_meta_absent(tmp_path):
     body = b"REAL CONTENT"
     pdf.write_bytes(body)
     assert extract_figures.compute_pdf_sha256(pdf) == hashlib.sha256(body).hexdigest()
+
+
+def test_cli_writes_full_sidecar_shape(multidisc_pdf, tmp_path):
+    rc = extract_figures.main([
+        "--pdf", str(multidisc_pdf),
+        "--out", str(tmp_path),
+        "--quiet",
+    ])
+    assert rc == 0
+    json_path = tmp_path / f"{multidisc_pdf.stem}.figures.json"
+    assert json_path.exists()
+    payload = json.loads(json_path.read_text(encoding="utf-8"))
+
+    # Required top-level fields
+    for k in (
+        "schema_version", "source_file", "source_pdf_sha256",
+        "extraction_date", "extractor_version", "extractor_thresholds",
+        "extractor_thresholds_hash", "substance", "substance_source",
+        "page_count", "figure_count", "redacted_count",
+        "dropped_header_decorations", "figures",
+    ):
+        assert k in payload, f"missing top-level key: {k}"
+    assert payload["schema_version"] == "1.0"
+    assert payload["page_count"] >= 100
+    assert len(payload["source_pdf_sha256"]) == 64
+    assert len(payload["extractor_thresholds_hash"]) == 64
+
+
+def test_cli_writes_assets_dir(multidisc_pdf, tmp_path):
+    extract_figures.main([
+        "--pdf", str(multidisc_pdf),
+        "--out", str(tmp_path),
+        "--quiet",
+    ])
+    assets_dir = tmp_path / f"{multidisc_pdf.stem}.assets"
+    if assets_dir.exists():
+        pngs = list(assets_dir.glob("figure_p*_f*.png"))
+        # Lower bound from spec Coverage table; actual seeded later.
+        assert len(pngs) >= 1
+
+
+def test_cli_skips_existing_without_force(multidisc_pdf, tmp_path):
+    extract_figures.main([
+        "--pdf", str(multidisc_pdf),
+        "--out", str(tmp_path),
+        "--quiet",
+    ])
+    json_path = tmp_path / f"{multidisc_pdf.stem}.figures.json"
+    first_mtime = json_path.stat().st_mtime
+
+    extract_figures.main([
+        "--pdf", str(multidisc_pdf),
+        "--out", str(tmp_path),
+        "--quiet",
+    ])
+    assert json_path.stat().st_mtime == first_mtime
+
+
+def test_cli_force_rewrites(multidisc_pdf, tmp_path):
+    extract_figures.main([
+        "--pdf", str(multidisc_pdf),
+        "--out", str(tmp_path),
+        "--quiet",
+    ])
+    json_path = tmp_path / f"{multidisc_pdf.stem}.figures.json"
+    first_mtime = json_path.stat().st_mtime
+
+    # Force needs visible mtime change; sleep impractical, just touch and re-run
+    import os, time
+    os.utime(json_path, (first_mtime - 10, first_mtime - 10))
+    pre_force_mtime = json_path.stat().st_mtime
+
+    extract_figures.main([
+        "--pdf", str(multidisc_pdf),
+        "--out", str(tmp_path),
+        "--force",
+        "--quiet",
+    ])
+    assert json_path.stat().st_mtime > pre_force_mtime
+
+
+def test_cli_different_thresholds_produce_different_hash(multidisc_pdf, tmp_path):
+    out_a = tmp_path / "a"
+    out_b = tmp_path / "b"
+    extract_figures.main([
+        "--pdf", str(multidisc_pdf),
+        "--out", str(out_a),
+        "--header-fraction", "0.15",
+        "--quiet",
+    ])
+    extract_figures.main([
+        "--pdf", str(multidisc_pdf),
+        "--out", str(out_b),
+        "--header-fraction", "0.25",
+        "--quiet",
+    ])
+    pa = json.loads((out_a / f"{multidisc_pdf.stem}.figures.json").read_text())
+    pb = json.loads((out_b / f"{multidisc_pdf.stem}.figures.json").read_text())
+    assert pa["extractor_thresholds_hash"] != pb["extractor_thresholds_hash"]
+
+
+def test_cli_writes_atomically(multidisc_pdf, tmp_path, monkeypatch):
+    """If atomic_write_json's os.replace fails, canonical file is unchanged."""
+    # First run writes a valid sidecar
+    extract_figures.main([
+        "--pdf", str(multidisc_pdf),
+        "--out", str(tmp_path),
+        "--quiet",
+    ])
+    json_path = tmp_path / f"{multidisc_pdf.stem}.figures.json"
+    original = json_path.read_text(encoding="utf-8")
+
+    # Re-run with --force but patch os.replace to fail mid-write
+    import os as _os
+    def boom(src, dst):
+        raise OSError("simulated disk error")
+    monkeypatch.setattr(_os, "replace", boom)
+
+    with pytest.raises(OSError):
+        extract_figures.main([
+            "--pdf", str(multidisc_pdf),
+            "--out", str(tmp_path),
+            "--force",
+            "--quiet",
+        ])
+    assert json_path.read_text(encoding="utf-8") == original

@@ -18,6 +18,19 @@ Usage:
 """
 from __future__ import annotations
 
+# Re-export from the shared vision backends module (same pattern as ocr_page.py).
+import importlib.util as _ilu
+from pathlib import Path as _Path
+import sys as _sys
+
+_vb_path = _Path(__file__).resolve().parent / "_vision_backends.py"
+_vb_spec = _ilu.spec_from_file_location("_vision_backends", _vb_path)
+_vision_backends = _ilu.module_from_spec(_vb_spec)
+_sys.modules["_vision_backends"] = _vision_backends
+_vb_spec.loader.exec_module(_vision_backends)
+
+atomic_write_json = _vision_backends.atomic_write_json
+
 import argparse
 import hashlib
 import json
@@ -371,9 +384,112 @@ def write_figure_assets(figures: list[dict], assets_dir: Path) -> list[dict]:
     return out
 
 
+SCHEMA_VERSION = "1.0"
+EXTRACTOR_VERSION = "extract_figures.py@2026-05-15"
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def main(argv: list[str] | None = None) -> int:
-    """Stub - populated in Task 10."""
-    raise NotImplementedError("main() implemented in Task 10")
+    parser = argparse.ArgumentParser(
+        description="Extract figure rasters from a PDF (Phase 3a).",
+    )
+    parser.add_argument("--pdf", type=Path, required=True)
+    parser.add_argument("--out", type=Path, required=True,
+                        help="Output dir; <stem>.figures.json + <stem>.assets/ written here")
+    parser.add_argument("--header-fraction", type=float, default=0.15)
+    parser.add_argument("--header-min-height", type=float, default=0.08)
+    parser.add_argument("--redaction-stddev", type=float, default=15.0)
+    parser.add_argument("--redaction-mean-max", type=float, default=245.0)
+    parser.add_argument("--min-area-px", type=int, default=400)
+    parser.add_argument("--nearby-text-max-chars", type=int, default=2500)
+    parser.add_argument("--force", action="store_true",
+                        help="Rewrite existing figures.json + assets")
+    parser.add_argument("--quiet", action="store_true")
+    args = parser.parse_args(argv)
+
+    args.out.mkdir(parents=True, exist_ok=True)
+    json_path = args.out / f"{args.pdf.stem}.figures.json"
+    assets_dir = args.out / f"{args.pdf.stem}.assets"
+
+    if json_path.exists() and not args.force:
+        if not args.quiet:
+            print(json.dumps({
+                "figures_json": str(json_path),
+                "status": "skipped:already_exists",
+                "hint": "pass --force to re-extract",
+            }, indent=2))
+        return 0
+
+    thresholds = {
+        "header_fraction": args.header_fraction,
+        "header_min_height": args.header_min_height,
+        "redaction_stddev": args.redaction_stddev,
+        "redaction_mean_max": args.redaction_mean_max,
+        "min_area_px": args.min_area_px,
+        "nearby_text_max_chars": args.nearby_text_max_chars,
+    }
+    thresholds_hash = hash_thresholds(thresholds)
+    pdf_sha = compute_pdf_sha256(args.pdf)
+    substance, substance_source = infer_substance(args.pdf)
+
+    all_figures: list[dict] = []
+    all_dropped: list[dict] = []
+    redacted_count = 0
+    with fitz.open(args.pdf) as doc:
+        page_count = doc.page_count
+        for i in range(page_count):
+            page_figs, page_dropped = extract_figures_from_page(
+                doc, i,
+                header_fraction=args.header_fraction,
+                header_min_height=args.header_min_height,
+                redaction_thresholds=(args.redaction_stddev, args.redaction_mean_max),
+                min_area_px=args.min_area_px,
+                nearby_text_max_chars=args.nearby_text_max_chars,
+            )
+            for f in page_figs:
+                if f.get("redacted"):
+                    redacted_count += 1
+            all_figures.extend(page_figs)
+            all_dropped.extend(page_dropped)
+
+    enriched = write_figure_assets(all_figures, assets_dir)
+
+    payload = {
+        "schema_version": SCHEMA_VERSION,
+        "source_file": args.pdf.name,
+        "source_pdf_sha256": pdf_sha,
+        "extraction_date": _utc_now_iso(),
+        "extractor_version": EXTRACTOR_VERSION,
+        "extractor_thresholds": thresholds,
+        "extractor_thresholds_hash": thresholds_hash,
+        "substance": substance,
+        "substance_source": substance_source,
+        "page_count": page_count,
+        "figure_count": len(enriched),
+        "redacted_count": redacted_count,
+        "dropped_header_decorations": all_dropped,
+        "captioning_date": None,
+        "captioning_engine": None,
+        "captioning_seconds": None,
+        "figures": enriched,
+    }
+    atomic_write_json(json_path, payload)
+
+    if not args.quiet:
+        print(json.dumps({
+            "figures_json": str(json_path),
+            "pdf": str(args.pdf),
+            "page_count": page_count,
+            "figure_count": len(enriched),
+            "redacted_count": redacted_count,
+            "dropped_header_decorations_count": len(all_dropped),
+            "substance": substance,
+            "substance_source": substance_source,
+        }, indent=2))
+    return 0
 
 
 if __name__ == "__main__":
