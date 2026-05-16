@@ -20,11 +20,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Iterable
 
 import fitz  # PyMuPDF
+
+
+CAPTION_PREFIX_RE = re.compile(r"^\s*(figure|fig\.|table)\s*\d+", re.IGNORECASE)
 
 
 # Recognized agency directory names. Substance is the directory ABOVE one
@@ -121,6 +125,69 @@ def is_redaction(
     var = max(0.0, sq / count - mean * mean)
     stddev = var ** 0.5
     return stddev < stddev_max and mean < mean_max
+
+
+def page_text_verbatim(page) -> str:
+    """Return the page's full text in document order (PyMuPDF page.get_text()).
+
+    This is the Tier-1-eligible page-text field per spec - preserves document
+    order so any 15-20-word substring appears contiguously and can be
+    verbatim-anchored. Distinct from nearby_text_for_bbox which reorders.
+    """
+    return page.get_text("text")
+
+
+def nearby_text_for_bbox(
+    page,
+    bbox_pdf: tuple[float, float, float, float],
+    *,
+    max_chars: int,
+) -> tuple[str, str]:
+    """Return (nearby_text, raw_caption_candidate) for a figure bbox.
+
+    Pulls ALL text blocks on the page, ranks each by minimal vertical gap
+    to the figure bbox, concatenates closest-first up to max_chars.
+    raw_caption_candidate is the first block matching CAPTION_PREFIX_RE
+    (truncated to 200 chars).
+
+    Output is captioner-context only - NOT Tier-1-eligible (the closest-
+    first ordering means substrings may not appear contiguously on the
+    source page). Use page_text_verbatim() for Tier-1 anchoring.
+    """
+    fy0, fy1 = bbox_pdf[1], bbox_pdf[3]
+    blocks = page.get_text("blocks")
+    scored: list[tuple[float, str]] = []
+    candidate = ""
+    for block in blocks:
+        if len(block) < 5:
+            continue
+        by0, by1, text = block[1], block[3], block[4]
+        if not isinstance(text, str) or not text.strip():
+            continue
+        if by1 < fy0:
+            gap = fy0 - by1
+        elif by0 > fy1:
+            gap = by0 - fy1
+        else:
+            gap = 0.0  # overlapping/inside the figure region
+        text_clean = text.strip()
+        if not candidate and CAPTION_PREFIX_RE.match(text_clean):
+            candidate = text_clean[:200]
+        scored.append((gap, text_clean))
+    scored.sort(key=lambda t: t[0])  # closest first
+    out_parts: list[str] = []
+    used = 0
+    for _, text in scored:
+        addition = text if not out_parts else " " + text
+        if used + len(addition) > max_chars:
+            remaining = max_chars - used
+            if remaining > 0:
+                out_parts.append(addition[:remaining])
+                used = max_chars
+            break
+        out_parts.append(addition)
+        used += len(addition)
+    return "".join(out_parts), candidate
 
 
 def main(argv: list[str] | None = None) -> int:

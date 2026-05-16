@@ -173,3 +173,81 @@ def test_is_redaction_against_known_corpus_redactions():
     on the apalutamide corpus once and recording observed redactions."""
     # Future: load page, extract figure at known bbox, assert is_redaction True
     pass
+
+
+def test_page_text_verbatim_returns_page_get_text():
+    class _FakePage:
+        def get_text(self, mode="text"):
+            if mode == "text":
+                return "Page one full text in document order.\nLine two.\n"
+            return None
+    assert (
+        extract_figures.page_text_verbatim(_FakePage())
+        == "Page one full text in document order.\nLine two.\n"
+    )
+
+
+def test_nearby_text_captures_caption_candidate():
+    class _FakePage:
+        rect = type("R", (), {"width": 600.0, "height": 800.0})()
+        def get_text(self, mode="text"):
+            if mode == "blocks":
+                return [
+                    (50, 100, 550, 130, "Figure 2. Plasma concentration over 24h.", 0, 0),
+                    (50, 200, 550, 600, "[image]", 1, 1),
+                    (50, 650, 550, 700, "Source: Sponsor analysis.", 2, 0),
+                ]
+            return "Figure 2. Plasma concentration over 24h.\n[image]\nSource: Sponsor analysis.\n"
+
+    bbox_pdf = (50, 200, 550, 600)
+    nearby, candidate = extract_figures.nearby_text_for_bbox(
+        _FakePage(), bbox_pdf, max_chars=600
+    )
+    assert "Figure 2" in candidate
+    assert "Plasma concentration" in candidate
+    assert ("Plasma" in nearby) or ("Source" in nearby)
+
+
+def test_nearby_text_ranks_closest_first():
+    """Closer block appears earlier in nearby_text."""
+    class _FakePage:
+        rect = type("R", (), {"width": 600.0, "height": 800.0})()
+        def get_text(self, mode="text"):
+            if mode == "blocks":
+                return [
+                    # Far-above block
+                    (50, 10, 550, 40, "FAR_ABOVE_TEXT", 0, 0),
+                    # Just-above block (closest)
+                    (50, 380, 550, 400, "JUST_ABOVE_TEXT", 1, 0),
+                    # Figure region
+                    (50, 410, 550, 600, "[image]", 2, 1),
+                    # Just-below block (close)
+                    (50, 610, 550, 640, "JUST_BELOW_TEXT", 3, 0),
+                ]
+            return "irrelevant for this test"
+
+    bbox_pdf = (50, 410, 550, 600)
+    nearby, _ = extract_figures.nearby_text_for_bbox(
+        _FakePage(), bbox_pdf, max_chars=10000
+    )
+    just_above_idx = nearby.find("JUST_ABOVE_TEXT")
+    far_above_idx = nearby.find("FAR_ABOVE_TEXT")
+    assert just_above_idx != -1 and far_above_idx != -1
+    assert just_above_idx < far_above_idx, (
+        f"closest-first violated: {nearby!r}"
+    )
+
+
+def test_nearby_text_truncates_to_max_chars():
+    long = "X" * 5000
+    class _FakePage:
+        rect = type("R", (), {"width": 600.0, "height": 800.0})()
+        def get_text(self, mode="text"):
+            if mode == "blocks":
+                return [(50, 100, 550, 130, long, 0, 0)]
+            return long
+
+    nearby, _ = extract_figures.nearby_text_for_bbox(
+        _FakePage(), (50, 200, 550, 600), max_chars=600
+    )
+    assert len(nearby) <= 600
