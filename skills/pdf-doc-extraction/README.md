@@ -21,8 +21,8 @@ pipx install --spec . pdf-doc-extraction-cli   # future, once a console_scripts 
 | `scripts/extract_text.py` | PyMuPDF text extraction → `<stem>.md` + `<stem>.extract.json` | shipped |
 | `scripts/ocr_page.py` | LMStudio OCR for problem pages | shipped |
 | `scripts/ensure_lmstudio.py` | Cross-shell pre-flight: starts server + loads model (idempotent) | shipped |
-| `scripts/extract_figures.py` | Raster + vector figures into `<stem>.assets/` | planned |
-| `scripts/caption_figure.py` | Vision-model caption per figure | planned |
+| `scripts/extract_figures.py` | Raster + vector figures into `<stem>.assets/` + sidecar JSON with text context | shipped |
+| `scripts/caption_figure.py` | Vision-model caption per figure (structured output; default Gemini) | shipped |
 | `scripts/assemble_md.py` | Stitch text + OCR + figures + captions | planned |
 
 ## Quick start
@@ -81,5 +81,25 @@ python scripts/ocr_page.py \
 
 Pass `--api-key` multiple times to round-robin across multiple keys for
 higher effective throughput on the free tier.
+
+### Phase 3 - figures + captions
+
+```bash
+# 3a: extract figures (atomic-write sidecar with content + thresholds hashes)
+python scripts/extract_figures.py \
+  --pdf ../../apalutamide/FDA/210951Orig1s000MultidisciplineR.pdf \
+  --out ../../apalutamide/FDA/
+
+# 3b: caption (structured output; uses GOOGLE_API_KEY/GEMINI_API_KEY from env)
+python scripts/caption_figure.py \
+  --figures-json ../../apalutamide/FDA/210951Orig1s000MultidisciplineR.figures.json
+
+# Optional: see if the sidecar is fresh without making API calls
+python scripts/caption_figure.py \
+  --figures-json ../../apalutamide/FDA/210951Orig1s000MultidisciplineR.figures.json \
+  --check-stale
+```
+
+Outputs: `<stem>.figures.json` + `<stem>.assets/figure_p*_f*.png`. The captioner refuses OCR-specialized models - pass a general vision model (`gemma-4-31b-it` for Gemini, `gemma-4-e4b-it` for LMStudio).
 
 See `SKILL.md` for the agent-facing contract.
