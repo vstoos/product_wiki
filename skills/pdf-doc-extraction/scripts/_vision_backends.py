@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import re
+import tempfile
 import urllib.error
 import urllib.request
 
@@ -29,6 +31,54 @@ OCR_PROMPT = (
     "- Do not add commentary, headers, or section labels you cannot see.\n"
     "- If the page is blank or unreadable, output exactly: [BLANK PAGE]\n"
 )
+
+CAPTION_PROMPT_TEMPLATE = (
+    "You will receive a figure image from a regulatory document. Output a JSON\n"
+    "object with exactly two fields:\n"
+    "  - \"type\": one of \"figure\" or \"table\"\n"
+    "  - \"content\": see rules below\n"
+    "\n"
+    "Context:\n"
+    "- Substance: {substance}\n"
+    "- Nearby text from the surrounding document: {nearby_text}\n"
+    "- Caption candidate (if found): {raw_caption_candidate}\n"
+    "\n"
+    "Rules for type=\"table\":\n"
+    "- Use this type if the image is a scanned table (rows and columns of cell\n"
+    "  data with headers, and no plotting elements).\n"
+    "- \"content\" is an HTML <table> transcription using rowspan/colspan for\n"
+    "  merged cells. Preserve cell text verbatim. No surrounding prose.\n"
+    "\n"
+    "Rules for type=\"figure\":\n"
+    "- Use this type for plots, charts, schematics, photographs, micrographs.\n"
+    "- \"content\" is a 3-5 sentence description.\n"
+    "- State the figure type (PK plot, dissolution profile, Kaplan-Meier curve,\n"
+    "  forest plot, scatter plot, schematic, photograph, etc.) in sentence 1.\n"
+    "- State axis labels and units if visible.\n"
+    "- Values policy:\n"
+    "   * Discrete labeled data points (dissolution % at named timepoints,\n"
+    "     mean +/- SD bars with annotated values, table-like overlays):\n"
+    "     transcribe the values literally.\n"
+    "   * Continuous curves (Kaplan-Meier survival, scatter, dose-response,\n"
+    "     concentration-time profiles without per-point labels): describe\n"
+    "     shape and inflection points; do NOT interpolate specific values.\n"
+    "- Always describe trends and relationships visible in the data.\n"
+    "- Be consistent with the caption candidate if one is provided.\n"
+    "- Never invent. If the image is unreadable, set content to \"[UNREADABLE]\".\n"
+    "\n"
+    "Output: a single JSON object, no surrounding prose, no markdown fences.\n"
+)
+
+
+# Captioning-model denylist. Explicit set, NOT a regex (a regex like /ocr/i
+# would falsely reject a future general vision model named e.g. "vision-ocr-1").
+# The OCR_MODEL_PATTERN regex above stays in place for the Phase 2 prompt-
+# selection heuristic, where false positives are harmless.
+CAPTION_DENYLIST = frozenset({
+    "glm-ocr",
+    "lightonocr-2-1b-ocr-soup",
+    "deepseek-ocr",
+})
 
 GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
 
@@ -177,3 +227,37 @@ def check_model_loaded(*, host: str, model: str, timeout: int = 5) -> str | None
     if model in loaded_ids:
         return None
     return f"model '{model}' is not loaded; loaded: {loaded_ids}. Try: lms load {model} --gpu max -y"
+
+
+def atomic_write_json(path, payload) -> None:
+    """Write JSON to `path` atomically via a sibling tmp file + os.replace.
+
+    Crash mid-write leaves the canonical file unchanged. Raises OSError on
+    write/replace failure; in that case the caller should NOT assume the
+    canonical content was updated.
+
+    Path may be str or pathlib.Path. Payload is anything json.dumps can encode.
+    """
+    from pathlib import Path
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    # Use NamedTemporaryFile in the target's directory so os.replace is atomic
+    # (must be on the same filesystem).
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=target.name + ".",
+        suffix=".tmp",
+        dir=str(target.parent),
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_name, target)
+    except Exception:
+        # Best-effort cleanup of the tmp file; canonical is unchanged.
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
