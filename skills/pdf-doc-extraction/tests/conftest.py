@@ -22,3 +22,12 @@ def suppl11_pdf() -> Path:
     if not p.exists():
         pytest.skip(f"test fixture missing: {p}")
     return p
+
+
+@pytest.fixture(scope="session")
+def multidisc_pdf() -> Path:
+    """Figure-rich corpus: 259-page FDA clinical review with PK/KM plots."""
+    p = APALUTAMIDE_FDA / "210951Orig1s000MultidisciplineR.pdf"
+    if not p.exists():
+        pytest.skip(f"test fixture missing: {p}")
+    return p

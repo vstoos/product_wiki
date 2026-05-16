@@ -68,3 +68,9 @@ def test_cli_writes_outputs(chemr_pdf, tmp_path):
     meta = json.loads(js.read_text(encoding="utf-8"))
     assert meta["page_count"] == 51
     assert meta["engine"] == "pymupdf"
+
+
+def test_multidisc_fixture_resolves_or_skips(multidisc_pdf):
+    """Fixture either points at a real PDF or pytest.skips."""
+    assert multidisc_pdf.exists()
+    assert multidisc_pdf.suffix == ".pdf"
