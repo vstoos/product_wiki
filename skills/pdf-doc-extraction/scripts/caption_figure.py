@@ -345,8 +345,128 @@ def process_figures(
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Implemented in Task 14."""
-    raise NotImplementedError("main() implemented in Task 14")
+    parser = argparse.ArgumentParser(
+        description="Caption extracted figures via a vision model (Phase 3b).",
+    )
+    parser.add_argument("--figures-json", type=Path, required=True)
+    parser.add_argument("--substance", default=None,
+                        help="Override; otherwise uses sidecar substance field.")
+    parser.add_argument("--engine", default="gemini", choices=["gemini", "lmstudio"])
+    parser.add_argument("--model", default=None,
+                        help="LMStudio model name (default: gemma-4-e4b-it). "
+                             "Ignored with --engine gemini.")
+    parser.add_argument("--host", default="http://localhost:1234")
+    parser.add_argument("--timeout", type=int, default=180)
+    parser.add_argument("--api-key", action="append", default=None,
+                        help="Gemini API key. Repeatable. Falls back to "
+                             "GEMINI_API_KEY/GOOGLE_API_KEY env var.")
+    parser.add_argument("--gemini-models",
+                        default="gemma-4-31b-it,gemma-4-26b-a4b-it",
+                        help="Comma-separated Gemini models for round-robin")
+    parser.add_argument("--force", action="store_true",
+                        help="Re-caption already-done figures; bypass freshness check")
+    parser.add_argument("--accept-stale", action="store_true",
+                        help="Proceed against a stale sidecar (warns instead of refusing)")
+    parser.add_argument("--check-stale", action="store_true",
+                        help="Print freshness diagnostic and exit 0; no HTTP")
+    parser.add_argument("--rate-budget-calls", type=int, default=None,
+                        help="Hard stop after N successful backend calls")
+    parser.add_argument("--quiet", action="store_true")
+    args = parser.parse_args(argv)
+
+    # 1. Load sidecar
+    payload = json.loads(args.figures_json.read_text(encoding="utf-8"))
+    pdf_path = _resolve_pdf_path(payload, args.figures_json)
+    current_thresholds_hash = payload.get("extractor_thresholds_hash", "")
+
+    # 2. Freshness check (always run; --check-stale short-circuits, --force
+    #    and --accept-stale only relax the refusal).
+    freshness_diag = check_sidecar_freshness(
+        payload,
+        pdf_path=pdf_path,
+        current_thresholds_hash=current_thresholds_hash,
+    )
+
+    if args.check_stale:
+        if freshness_diag:
+            print(json.dumps({
+                "figures_json": str(args.figures_json),
+                "status": "stale",
+                "diagnostic": freshness_diag,
+            }, indent=2))
+        else:
+            print(json.dumps({
+                "figures_json": str(args.figures_json),
+                "status": "fresh",
+            }, indent=2))
+        return 0
+
+    if freshness_diag and not (args.force or args.accept_stale):
+        print(f"error: sidecar is stale: {freshness_diag}", file=sys.stderr)
+        print("       pass --accept-stale to proceed, or re-run extract_figures.py "
+              "and try again.", file=sys.stderr)
+        return 3
+
+    if freshness_diag and (args.force or args.accept_stale) and not args.quiet:
+        print(f"WARNING: sidecar is stale ({freshness_diag}); proceeding due to flag",
+              file=sys.stderr)
+
+    # 3. Resolve backend kwargs + denylist check
+    if args.engine == "lmstudio":
+        model = args.model or "gemma-4-e4b-it"
+        err = validate_captioning_model("lmstudio", model)
+        if err:
+            print(f"error: {err}", file=sys.stderr)
+            return 2
+        backend_kwargs = {"host": args.host, "model": model, "timeout": args.timeout}
+    else:  # gemini
+        keys = list(args.api_key or [])
+        env_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+        if not keys and env_key:
+            keys = [env_key]
+        if not keys:
+            print("error: --engine gemini requires --api-key or "
+                  "GEMINI_API_KEY/GOOGLE_API_KEY env var", file=sys.stderr)
+            return 2
+        models = [m.strip() for m in args.gemini_models.split(",") if m.strip()]
+        if not models:
+            print("error: --gemini-models is empty after parsing", file=sys.stderr)
+            return 2
+        pairs = [(k, m) for k in keys for m in models]
+        backend_kwargs = {"pairs": pairs, "timeout": args.timeout}
+
+    # 4. Process
+    substance = args.substance or payload.get("substance")
+    assets_root = args.figures_json.parent
+
+    t0 = time.monotonic()
+    new_figures, stats = process_figures(
+        payload.get("figures", []),
+        assets_root=assets_root,
+        substance=substance,
+        engine=args.engine,
+        backend_kwargs=backend_kwargs,
+        force=args.force,
+        rate_budget_calls=args.rate_budget_calls,
+    )
+    duration = round(time.monotonic() - t0, 3)
+
+    # 5. Atomic write
+    payload["figures"] = new_figures
+    payload["captioning_date"] = _utc_now_iso()
+    payload["captioning_engine"] = args.engine
+    payload["captioning_seconds"] = duration
+    payload["budget_exhausted"] = stats["budget_exhausted"]
+    atomic_write_json(args.figures_json, payload)
+
+    if not args.quiet:
+        print(json.dumps({
+            "figures_json": str(args.figures_json),
+            "engine": args.engine,
+            **stats,
+            "total_seconds": duration,
+        }, indent=2))
+    return 0
 
 
 if __name__ == "__main__":

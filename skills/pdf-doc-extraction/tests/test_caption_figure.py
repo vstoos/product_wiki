@@ -404,3 +404,216 @@ def test_process_figures_resume_after_budget(tmp_path):
     assert stats["captioned"] == 2
     assert stats["skipped_done"] == 3
     assert all(f["description"] for f in out)
+
+
+# --- main() CLI ---
+
+def _seed_figures_json(tmp_path: Path, *, fresh: bool = True,
+                      with_caption: bool = False) -> tuple[Path, Path]:
+    """Seed a tmp_path with stem.pdf, stem.figures.json, and stem.assets/.
+
+    Returns (figures_json_path, pdf_path). If fresh=False, sidecar hashes
+    don't match (used to test stale-sidecar refusal).
+    """
+    pdf = tmp_path / "stem.pdf"
+    pdf.write_bytes(b"FAKE PDF BODY")
+    assets = tmp_path / "stem.assets"
+    assets.mkdir()
+    (assets / "figure_p1_f1.png").write_bytes(b"\x89PNG\r\n\x1a\nFAKE")
+    real_sha = caption_figure._sha256_file(pdf)
+    fake_sha = "0" * 64
+    thresholds = {
+        "header_fraction": 0.15,
+        "header_min_height": 0.08,
+        "redaction_stddev": 15.0,
+        "redaction_mean_max": 245.0,
+        "min_area_px": 400,
+        "nearby_text_max_chars": 2500,
+    }
+    import hashlib as _h
+    canon = json.dumps(thresholds, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    real_t_hash = _h.sha256(canon).hexdigest()
+    fake_t_hash = "f" * 64
+    payload = {
+        "schema_version": "1.0",
+        "source_file": "stem.pdf",
+        "source_pdf_sha256": real_sha if fresh else fake_sha,
+        "extraction_date": "2026-05-15T00:00:00Z",
+        "extractor_version": "extract_figures.py@2026-05-15",
+        "extractor_thresholds": thresholds,
+        "extractor_thresholds_hash": real_t_hash if fresh else fake_t_hash,
+        "substance": "apalutamide",
+        "substance_source": "metadata_json",
+        "page_count": 1,
+        "figure_count": 1,
+        "redacted_count": 0,
+        "dropped_header_decorations": [],
+        "captioning_date": None,
+        "captioning_engine": None,
+        "captioning_seconds": None,
+        "figures": [_make_figure(
+            "stem.assets/figure_p1_f1.png",
+            captioner=("gemini:gemma-4-31b-it@2026-05-14" if with_caption else None),
+            description=("Existing." if with_caption else None),
+        )],
+    }
+    fj = tmp_path / "stem.figures.json"
+    fj.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return fj, pdf
+
+
+def test_cli_refuses_ocr_specialized_lmstudio_model(tmp_path, capsys):
+    fj, _pdf = _seed_figures_json(tmp_path)
+    rc = caption_figure.main([
+        "--figures-json", str(fj),
+        "--engine", "lmstudio",
+        "--model", "glm-ocr",
+    ])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "denylist" in err.lower() or "general vision" in err.lower()
+
+
+def test_cli_refuses_stale_sidecar_without_force(tmp_path, capsys):
+    fj, _pdf = _seed_figures_json(tmp_path, fresh=False)
+    rc = caption_figure.main([
+        "--figures-json", str(fj),
+        "--engine", "gemini",
+        "--api-key", "K",
+        "--gemini-models", "gemma-4-31b-it",
+    ])
+    assert rc != 0
+    err = capsys.readouterr().err
+    assert "stale" in err.lower() or "mismatch" in err.lower() or "sha256" in err.lower()
+
+
+def test_cli_accept_stale_overrides_freshness(tmp_path):
+    fj, _pdf = _seed_figures_json(tmp_path, fresh=False)
+    with patch.object(caption_figure, "transcribe_gemini_structured",
+                      return_value=("figure", "A plot.")):
+        rc = caption_figure.main([
+            "--figures-json", str(fj),
+            "--engine", "gemini",
+            "--api-key", "K",
+            "--gemini-models", "gemma-4-31b-it",
+            "--accept-stale",
+        ])
+    assert rc == 0
+    payload = json.loads(fj.read_text(encoding="utf-8"))
+    assert payload["figures"][0]["description"] == "A plot."
+
+
+def test_cli_check_stale_no_calls(tmp_path, capsys):
+    fj, _pdf = _seed_figures_json(tmp_path, fresh=False)
+    with patch("urllib.request.urlopen") as urlopen:
+        rc = caption_figure.main([
+            "--figures-json", str(fj),
+            "--engine", "gemini",
+            "--api-key", "K",
+            "--gemini-models", "gemma-4-31b-it",
+            "--check-stale",
+        ])
+        assert urlopen.call_count == 0
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert "stale" in (captured.out + captured.err).lower() or "mismatch" in (captured.out + captured.err).lower()
+
+
+def test_cli_writes_descriptions_back(tmp_path):
+    fj, _pdf = _seed_figures_json(tmp_path)
+    with patch.object(caption_figure, "transcribe_gemini_structured",
+                      return_value=("figure", "A bar chart of AEs.")):
+        rc = caption_figure.main([
+            "--figures-json", str(fj),
+            "--engine", "gemini",
+            "--api-key", "K",
+            "--gemini-models", "gemma-4-31b-it",
+        ])
+    assert rc == 0
+    payload = json.loads(fj.read_text(encoding="utf-8"))
+    fig = payload["figures"][0]
+    assert fig["description"] == "A bar chart of AEs."
+    assert fig["content_type"] == "figure"
+    assert fig["description_tier"] == 2
+    assert fig["captioner"].startswith("gemini:gemma-4-31b-it@")
+    assert isinstance(fig["prompt_hash"], str) and len(fig["prompt_hash"]) == 16
+    # Top-level captioning metadata
+    assert payload["captioning_engine"] == "gemini"
+    assert isinstance(payload["captioning_seconds"], (int, float))
+    assert payload["captioning_date"] is not None
+
+
+def test_cli_force_re_captions_existing(tmp_path):
+    fj, _pdf = _seed_figures_json(tmp_path, with_caption=True)
+    with patch.object(caption_figure, "transcribe_gemini_structured",
+                      return_value=("figure", "Fresh.")):
+        rc = caption_figure.main([
+            "--figures-json", str(fj),
+            "--engine", "gemini",
+            "--api-key", "K",
+            "--gemini-models", "gemma-4-31b-it",
+            "--force",
+        ])
+    assert rc == 0
+    payload = json.loads(fj.read_text(encoding="utf-8"))
+    assert payload["figures"][0]["description"] == "Fresh."
+
+
+def test_cli_uses_substance_from_sidecar(tmp_path):
+    fj, _pdf = _seed_figures_json(tmp_path)
+    captured = {}
+    def fake(image_bytes, *, api_key, model, timeout, prompt):
+        captured["prompt"] = prompt
+        return ("figure", "OK")
+    with patch.object(caption_figure, "transcribe_gemini_structured", side_effect=fake):
+        rc = caption_figure.main([
+            "--figures-json", str(fj),
+            "--engine", "gemini",
+            "--api-key", "K",
+            "--gemini-models", "gemma-4-31b-it",
+        ])
+    assert rc == 0
+    assert "apalutamide" in captured["prompt"]
+
+
+def test_cli_gemini_uses_env_var_fallback(tmp_path, monkeypatch):
+    fj, _pdf = _seed_figures_json(tmp_path)
+    monkeypatch.setenv("GOOGLE_API_KEY", "FROM_ENV")
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    with patch.object(caption_figure, "transcribe_gemini_structured",
+                      return_value=("figure", "OK")) as gem:
+        rc = caption_figure.main([
+            "--figures-json", str(fj),
+            "--engine", "gemini",
+            "--gemini-models", "gemma-4-31b-it",
+        ])
+    assert rc == 0
+    assert gem.call_args.kwargs["api_key"] == "FROM_ENV"
+
+
+def test_cli_rate_budget_writes_partial_and_flag(tmp_path):
+    fj, _pdf = _seed_figures_json(tmp_path)
+    # Seed two figures, budget = 1
+    payload = json.loads(fj.read_text(encoding="utf-8"))
+    second = _make_figure("stem.assets/figure_p2_f1.png")
+    second["figure_id"] = "p2_f1"
+    second["page_number"] = 2
+    (tmp_path / "stem.assets" / "figure_p2_f1.png").write_bytes(b"\x89PNG\r\n\x1a\nB")
+    payload["figures"].append(second)
+    payload["figure_count"] = 2
+    fj.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    with patch.object(caption_figure, "transcribe_gemini_structured",
+                      return_value=("figure", "Captioned.")):
+        rc = caption_figure.main([
+            "--figures-json", str(fj),
+            "--engine", "gemini",
+            "--api-key", "K",
+            "--gemini-models", "gemma-4-31b-it",
+            "--rate-budget-calls", "1",
+        ])
+    assert rc == 0
+    payload = json.loads(fj.read_text(encoding="utf-8"))
+    descs = [f.get("description") for f in payload["figures"]]
+    assert descs.count("Captioned.") == 1
+    assert payload.get("budget_exhausted") is True
