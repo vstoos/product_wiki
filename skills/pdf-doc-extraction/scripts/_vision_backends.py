@@ -378,3 +378,14 @@ def atomic_write_json(path, payload) -> None:
         except OSError:
             pass
         raise
+
+
+def hash_thresholds(thresholds: dict) -> str:
+    """SHA-256 hex of a JSON-canonical thresholds dict (key-order invariant).
+
+    Shared between extract_figures (Phase 3a) and caption_figure (Phase 3b)
+    so the freshness contract is enforced from a single source of truth.
+    """
+    import hashlib
+    canon = json.dumps(thresholds, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(canon).hexdigest()

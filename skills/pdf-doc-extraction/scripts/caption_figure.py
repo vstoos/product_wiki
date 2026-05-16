@@ -24,6 +24,7 @@ _vb_spec.loader.exec_module(_vision_backends)
 CAPTION_PROMPT_TEMPLATE = _vision_backends.CAPTION_PROMPT_TEMPLATE
 CAPTION_DENYLIST = _vision_backends.CAPTION_DENYLIST
 atomic_write_json = _vision_backends.atomic_write_json
+hash_thresholds = _vision_backends.hash_thresholds
 transcribe_lmstudio_structured = _vision_backends.transcribe_lmstudio_structured
 transcribe_gemini_structured = _vision_backends.transcribe_gemini_structured
 
@@ -377,7 +378,11 @@ def main(argv: list[str] | None = None) -> int:
     # 1. Load sidecar
     payload = json.loads(args.figures_json.read_text(encoding="utf-8"))
     pdf_path = _resolve_pdf_path(payload, args.figures_json)
-    current_thresholds_hash = payload.get("extractor_thresholds_hash", "")
+    # Recompute the thresholds hash from the dict in the sidecar.
+    # This catches tampered or corrupted sidecars where extractor_thresholds_hash
+    # was hand-edited or where the dict was modified without updating the hash.
+    thresholds_dict = payload.get("extractor_thresholds", {})
+    current_thresholds_hash = hash_thresholds(thresholds_dict) if thresholds_dict else ""
 
     # 2. Freshness check (always run; --check-stale short-circuits, --force
     #    and --accept-stale only relax the refusal).

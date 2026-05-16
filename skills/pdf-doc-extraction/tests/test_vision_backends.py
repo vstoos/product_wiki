@@ -230,3 +230,13 @@ def test_gemini_structured_returns_none_on_parse_failure():
         )
     assert t is None
     assert c == "not json"
+
+
+def test_hash_thresholds_exists_at_shared_level():
+    assert hasattr(vb, "hash_thresholds")
+    h = vb.hash_thresholds({"a": 1, "b": 2})
+    assert isinstance(h, str) and len(h) == 64
+
+
+def test_hash_thresholds_is_key_order_invariant():
+    assert vb.hash_thresholds({"a": 1, "b": 2}) == vb.hash_thresholds({"b": 2, "a": 1})

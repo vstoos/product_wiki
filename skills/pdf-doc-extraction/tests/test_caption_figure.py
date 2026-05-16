@@ -617,3 +617,44 @@ def test_cli_rate_budget_writes_partial_and_flag(tmp_path):
     descs = [f.get("description") for f in payload["figures"]]
     assert descs.count("Captioned.") == 1
     assert payload.get("budget_exhausted") is True
+
+
+def test_cli_refuses_when_thresholds_hash_tampered(tmp_path, capsys):
+    """Holistic-review regression: caption_figure must recompute the thresholds
+    hash from the dict in the sidecar, NOT compare the stored hash to itself.
+
+    Seed a fresh sidecar (PDF sha matches), then hand-tamper
+    extractor_thresholds_hash to a bogus value. caption_figure should refuse
+    (exit 3) because the hash doesn't match the dict.
+    """
+    fj, _pdf = _seed_figures_json(tmp_path, fresh=True)
+    payload = json.loads(fj.read_text(encoding="utf-8"))
+    # Tamper: stored hash no longer matches the thresholds dict
+    payload["extractor_thresholds_hash"] = "0" * 64
+    fj.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    rc = caption_figure.main([
+        "--figures-json", str(fj),
+        "--engine", "gemini",
+        "--api-key", "K",
+        "--gemini-models", "gemma-4-31b-it",
+    ])
+    assert rc == 3, "tampered hash should be detected as stale"
+    err = capsys.readouterr().err
+    assert "stale" in err.lower() or "threshold" in err.lower() or "mismatch" in err.lower()
+
+
+def test_cli_accepts_when_thresholds_dict_and_hash_match(tmp_path):
+    """Sanity: the fresh sidecar (where dict matches hash) is NOT refused.
+    Companion to the tampered test - proves the fix doesn't break the happy path."""
+    fj, _pdf = _seed_figures_json(tmp_path, fresh=True)
+    # No tampering this time
+    with patch.object(caption_figure, "transcribe_gemini_structured",
+                      return_value=("figure", "OK")):
+        rc = caption_figure.main([
+            "--figures-json", str(fj),
+            "--engine", "gemini",
+            "--api-key", "K",
+            "--gemini-models", "gemma-4-31b-it",
+        ])
+    assert rc == 0

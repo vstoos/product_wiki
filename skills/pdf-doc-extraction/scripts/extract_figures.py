@@ -30,6 +30,7 @@ _sys.modules["_vision_backends"] = _vision_backends
 _vb_spec.loader.exec_module(_vision_backends)
 
 atomic_write_json = _vision_backends.atomic_write_json
+hash_thresholds = _vision_backends.hash_thresholds
 
 import argparse
 import hashlib
@@ -298,12 +299,6 @@ def extract_figures_from_page(
         })
 
     return figures, dropped
-
-
-def hash_thresholds(thresholds: dict) -> str:
-    """SHA-256 hex of a JSON-canonical thresholds dict (key-order invariant)."""
-    canon = json.dumps(thresholds, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    return hashlib.sha256(canon).hexdigest()
 
 
 def compute_pdf_sha256(pdf_path: Path) -> str:
