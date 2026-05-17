@@ -41,7 +41,7 @@ The shape on disk follows the convention already established by upstream extract
 | `scripts/ocr_page.py` | shipped | llama.cpp OCR for problem pages. Reads Phase 1's `<stem>.extract.json`, transcribes flagged pages, writes `<stem>.ocr.json`. Gemini API round-robin is the cloud fallback (Phase 2b). |
 | `scripts/extract_figures.py` | Phase 3a | Walks each page, extracts embedded figure rasters as PNGs, drops agency-logo header decorations (logged to `dropped_header_decorations[]`), detects `(b)(4)` redactions by pixel statistics, captures `page_text_verbatim` (document-ordered, Tier-1-eligible) + `nearby_text` (closest-first, captioner-context only). Atomic-write `<stem>.figures.json` + `<stem>.assets/figure_pN_fM.png`. Sidecar carries `source_pdf_sha256` + `extractor_thresholds_hash` for idempotency. |
 | `scripts/caption_figure.py` | Phase 3b | Reads `<stem>.figures.json`, verifies freshness against the sidecar's PDF + thresholds hashes (refuses stale unless `--force`/`--accept-stale`), sends each non-redacted figure PNG to a vision backend in **structured-output mode** (`{type: "figure"|"table", content: ...}`). Default backend Gemini cloud; llama.cpp supported with `CAPTION_DENYLIST` substring enforcement (refuses any model id containing `glm-ocr` / `lightonocr` / `deepseek-ocr`). Atomic write descriptions + `captioner: "engine:model@YYYY-MM-DD"` + `prompt_hash` back into the same JSON. |
-| `scripts/assemble_md.py` | planned | Stitch text + OCR + figures + captions into the final `<stem>.md`. |
+| `scripts/assemble_md.py` | Phase 4 | Stitch Phase 1 PyMuPDF text + Phase 2 OCR + Phase 3 figure-captions into `<stem>.hybrid.md` with `<a id="pN"></a>` page anchors. Reads sidecars only (never re-opens the PDF). Writes `<stem>.hybrid.md` + `<stem>.assembly.json` (ALCOA metadata: page-source counts, figure counts, input hashes, timing). |
 
 See `README.md` for invocation; see `references/` for engine-comparison details.
 
@@ -166,6 +166,24 @@ Stage 3a writes `<stem>.figures.json` (atomic) + `<stem>.assets/figure_pN_fM.png
 - `wiki-pharma-extraction` enforces this via Rule 2b: "Tier 1 may cite only `raw_caption_candidate` or `page_text_verbatim`."
 
 **Freshness contract:** the sidecar's `source_pdf_sha256` + `extractor_thresholds_hash` must match the current PDF + extractor defaults; otherwise `caption_figure.py` refuses to run. Override with `--accept-stale` or `--force`. `--check-stale` prints the freshness diagnostic without running HTTP.
+
+## Assembly (Phase 4)
+
+```bash
+python skills/pdf-doc-extraction/scripts/assemble_md.py \
+  --pdf <substance>/<AGENCY>/<file>.pdf \
+  --out <substance>/<AGENCY>/
+```
+
+Reads Phase 1 `<stem>.md` + `<stem>.extract.json` (required) and Phase 2 `<stem>.ocr.json` + Phase 3 `<stem>.figures.json` (optional). Auto-discovers sidecars in `--out`; override with `--md`, `--extract-json`, `--ocr-json`, `--figures-json`.
+
+Writes:
+- `<stem>.hybrid.md` — anchored markdown. Each page is preceded by `<a id="pN"></a>` and `## Page N`. OCR text replaces PyMuPDF text on problem pages (`status: ok`); OCR failures annotate via `<!-- ocr-failed: ... -->` then fall back to PyMuPDF; pages with no OCR run get `<!-- problem-page: ... OCR not run -->`. Figures inline after their page body in `page_index_within` order.
+- `<stem>.assembly.json` — ALCOA metadata: page-source counts (`pymupdf_clean | ocr_ok | ocr_failed | ocr_not_run`), figure counts (`total | captioned | uncaptioned | redacted | errored`), `source_pdf_sha256` (looked up from figures.json / `<stem>.meta.json`), and `assembly_seconds`.
+
+**Refuses to overwrite** an existing `.hybrid.md` without `--force` (mirrors `extract_figures.py`).
+
+**Cite p.N against `<stem>.hybrid.md#pN`** — the anchor + heading combo is the Tier-1 citation contract for `wiki-pharma-extraction`.
 
 **Defaults:**
 - 3a: `--header-fraction 0.15 --header-min-height 0.08` (drop top-band logos)

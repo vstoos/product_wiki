@@ -22,7 +22,7 @@ pipx install --spec . pdf-doc-extraction-cli   # future, once a console_scripts 
 | `scripts/ocr_page.py` | llama.cpp OCR for problem pages | shipped |
 | `scripts/extract_figures.py` | Raster + vector figures into `<stem>.assets/` + sidecar JSON with text context | shipped |
 | `scripts/caption_figure.py` | Vision-model caption per figure (structured output; default Gemini) | shipped |
-| `scripts/assemble_md.py` | Stitch text + OCR + figures + captions | planned |
+| `scripts/assemble_md.py` | Stitch text + OCR + figures + captions into `<stem>.hybrid.md` with page anchors | shipped |
 
 ## Quick start
 
@@ -105,5 +105,15 @@ python scripts/caption_figure.py \
 ```
 
 Outputs: `<stem>.figures.json` + `<stem>.assets/figure_p*_f*.png`. The captioner refuses OCR-specialized models (substring patterns `glm-ocr`/`lightonocr`/`deepseek-ocr`) — pass a general vision model. Default Gemini rotation is `gemma-4-26b-a4b-it,gemma-4-31b-it` (fast MoE primary + dense chemistry-precision secondary, 30 RPM combined under the 15-RPM-per-model cap). For local, prefer `Qwen3.5-4B-Q4_K_M.gguf` (fast) or `Qwen3.5-35B-A3B-Q4_K_M.gguf` MoE (quality).
+
+### Phase 4 - assemble hybrid markdown
+
+```bash
+python scripts/assemble_md.py \
+  --pdf ../../apalutamide/FDA/210951Orig1s000ChemR.pdf \
+  --out ../../apalutamide/FDA/
+```
+
+Writes `<stem>.hybrid.md` (page-anchored markdown) + `<stem>.assembly.json` (metadata). Reads Phase 1 `<stem>.md` + `<stem>.extract.json` (required) and Phase 2 `<stem>.ocr.json` + Phase 3 `<stem>.figures.json` (optional, auto-discovered). On problem pages OCR text replaces PyMuPDF text; figures are inlined after each page body. Refuses to overwrite without `--force`.
 
 See `SKILL.md` for the agent-facing contract.
