@@ -311,6 +311,115 @@ def test_caption_one_figure_gemini_round_robin_advances_on_429(tmp_path):
     assert out["content_type"] == "figure"
 
 
+def test_caption_one_figure_gemini_round_robin_advances_on_5xx(tmp_path):
+    """First pair 503s; second pair succeeds. 5xx is transient like 429."""
+    import urllib.error
+    root = _seed_assets(tmp_path)
+    fig = _make_figure("stem.assets/figure_p1_f1.png")
+    calls: list[tuple[str, str]] = []
+    def fake(image_png_bytes, *, api_key, model, timeout, prompt):
+        calls.append((api_key, model))
+        if api_key == "K1":
+            raise urllib.error.HTTPError(
+                url="http://x", code=503, msg="service unavailable", hdrs=None, fp=None,
+            )
+        return ("figure", "A plot.")
+    with patch.object(caption_figure, "transcribe_gemini_structured", side_effect=fake):
+        out = caption_figure.caption_one_figure(
+            fig, assets_root=root, substance="apalutamide",
+            engine="gemini",
+            backend_kwargs={
+                "pairs": [("K1", "m1"), ("K2", "m2")],
+                "timeout": 60,
+            },
+        )
+    assert calls == [("K1", "m1"), ("K2", "m2")]
+    assert out["content_type"] == "figure"
+
+
+def test_caption_one_figure_gemini_round_robin_advances_on_parse_failure(tmp_path):
+    """First pair returns (None, raw_text) - parse failure; advances to second pair."""
+    root = _seed_assets(tmp_path)
+    fig = _make_figure("stem.assets/figure_p1_f1.png")
+    calls: list[tuple[str, str]] = []
+    def fake(image_png_bytes, *, api_key, model, timeout, prompt):
+        calls.append((api_key, model))
+        if api_key == "K1":
+            return (None, "not json sorry")  # parse failure on first pair
+        return ("figure", "A plot.")
+    with patch.object(caption_figure, "transcribe_gemini_structured", side_effect=fake):
+        out = caption_figure.caption_one_figure(
+            fig, assets_root=root, substance="apalutamide",
+            engine="gemini",
+            backend_kwargs={
+                "pairs": [("K1", "m1"), ("K2", "m2")],
+                "timeout": 60,
+            },
+        )
+    assert calls == [("K1", "m1"), ("K2", "m2")]
+    assert out["content_type"] == "figure"
+    assert out["description"] == "A plot."
+
+
+def test_caption_one_figure_gemini_round_robin_propagates_non_transient_4xx(tmp_path):
+    """HTTP 4xx (other than 429) is non-transient and propagates - no retry."""
+    import urllib.error
+    root = _seed_assets(tmp_path)
+    fig = _make_figure("stem.assets/figure_p1_f1.png")
+    calls: list[tuple[str, str]] = []
+    def fake(image_png_bytes, *, api_key, model, timeout, prompt):
+        calls.append((api_key, model))
+        raise urllib.error.HTTPError(
+            url="http://x", code=400, msg="bad request", hdrs=None, fp=None,
+        )
+    with patch.object(caption_figure, "transcribe_gemini_structured", side_effect=fake):
+        out = caption_figure.caption_one_figure(
+            fig, assets_root=root, substance="apalutamide",
+            engine="gemini",
+            backend_kwargs={
+                "pairs": [("K1", "m1"), ("K2", "m2")],
+                "timeout": 60,
+            },
+        )
+    # Per-figure error containment in caption_one_figure -> writes content_type=error.
+    # Critically, only ONE pair was tried (the 400 propagated, no advance).
+    assert calls == [("K1", "m1")]
+    assert out["content_type"] == "error"
+    assert "400" in out["error"] or "bad request" in out["error"].lower()
+
+
+def test_process_figures_rotates_gemini_pairs_per_call(tmp_path):
+    """With 2 figures and 2 gemini pairs, the second figure should be served by
+    the OTHER pair than the first - rotating per call spreads load across the
+    15-RPM-per-model cap to get ~30 RPM combined."""
+    root = _seed_assets(tmp_path)
+    figs = [
+        _make_figure("stem.assets/figure_p1_f1.png"),
+        _make_figure("stem.assets/figure_p2_f1.png"),
+    ]
+    # Seed the second asset so caption_one_figure can read it
+    (root / "stem.assets" / "figure_p2_f1.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"x" * 100)
+    calls: list[tuple[str, str]] = []
+    def fake(image_png_bytes, *, api_key, model, timeout, prompt):
+        calls.append((api_key, model))
+        return ("figure", f"served by {model}")
+    pairs = [("K", "primary"), ("K", "secondary")]
+    with patch.object(caption_figure, "transcribe_gemini_structured", side_effect=fake):
+        out, _stats = caption_figure.process_figures(
+            figs,
+            assets_root=root,
+            substance="apalutamide",
+            engine="gemini",
+            backend_kwargs={"pairs": list(pairs), "timeout": 60},
+            force=False,
+            rate_budget_calls=None,
+        )
+    # First call uses primary; second call rotated, so secondary serves it
+    assert calls == [("K", "primary"), ("K", "secondary")]
+    assert out[0]["description"] == "served by primary"
+    assert out[1]["description"] == "served by secondary"
+
+
 def test_process_figures_skips_already_captioned(tmp_path):
     root = _seed_assets(tmp_path)
     figs = [_make_figure("stem.assets/figure_p1_f1.png",

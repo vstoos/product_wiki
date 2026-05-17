@@ -51,15 +51,17 @@ def _gemini_with_round_robin(
     timeout: int,
     prompt: str,
 ) -> str:
-    """Try each (api_key, model) pair in order. Advance on HTTP 429, raise otherwise.
+    """Try each (api_key, model) pair in order. Retry on transient failures.
+
+    Advances to the next pair on HTTP 429 (rate limit) or HTTP 5xx
+    (transient server error). Non-transient HTTPError codes propagate.
+    Raises RuntimeError if every pair is exhausted, carrying the last error.
 
     Thin wrapper over transcribe_gemini that lives here so that
     patch.object(ocr_page, 'transcribe_gemini') is intercepted correctly
     in tests that mock the HTTP layer.
-
-    Raises RuntimeError if every pair returns 429.
     """
-    last_429: Exception | None = None
+    last_err: Exception | None = None
     for api_key, model in pairs:
         try:
             return transcribe_gemini(
@@ -70,13 +72,13 @@ def _gemini_with_round_robin(
                 prompt=prompt,
             )
         except urllib.error.HTTPError as e:
-            if e.code == 429:
-                last_429 = e
+            if e.code == 429 or 500 <= e.code < 600:
+                last_err = e
                 continue
             raise
     raise RuntimeError(
-        f"all gemini (api_key, model) pairs returned 429 ({len(pairs)} tried)"
-    ) from last_429
+        f"all gemini (api_key, model) pairs exhausted ({len(pairs)} tried); last={last_err}"
+    ) from last_err
 
 
 def parse_page_spec(spec: str) -> list[int]:

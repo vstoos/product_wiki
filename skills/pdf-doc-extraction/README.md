@@ -104,6 +104,6 @@ python scripts/caption_figure.py \
   --check-stale
 ```
 
-Outputs: `<stem>.figures.json` + `<stem>.assets/figure_p*_f*.png`. The captioner refuses OCR-specialized models (substring patterns `glm-ocr`/`lightonocr`/`deepseek-ocr`) — pass a general vision model (`gemma-4-31b-it` for Gemini, `gemma-4-E4B-it-Q4_K_M.gguf` for llama.cpp).
+Outputs: `<stem>.figures.json` + `<stem>.assets/figure_p*_f*.png`. The captioner refuses OCR-specialized models (substring patterns `glm-ocr`/`lightonocr`/`deepseek-ocr`) — pass a general vision model. Default Gemini rotation is `gemma-4-26b-a4b-it,gemma-4-31b-it` (fast MoE primary + dense chemistry-precision secondary, 30 RPM combined under the 15-RPM-per-model cap). For local, prefer `Qwen3.5-4B-Q4_K_M.gguf` (fast) or `Qwen3.5-35B-A3B-Q4_K_M.gguf` MoE (quality).
 
 See `SKILL.md` for the agent-facing contract.

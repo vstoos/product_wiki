@@ -15,7 +15,7 @@ Use the cheapest / fastest model that gets the job done. Defaults:
 |---|---|---|---|
 | Per-page text vs OCR routing, engine choice, caption-or-skip | **Haiku** | Sonnet only after Haiku gives clearly wrong output twice | Opus |
 | OCR of scanned pages | **`LightOnOCR-2-1B-ocr-soup-BF16.gguf` via llama.cpp (1B BF16, OCR-specialized, captures HTML table structure + markdown headers, ~12s/page on Mobile RTX 3060)** | `GLM-OCR-Q8_0.gguf` (smaller/faster ~9s/page when table structure isn't needed); `DeepSeek-OCR-Q8_0.gguf` (markdown pipe-tables); Gemini API free-tier Gemma models via `--engine gemini` when local is unavailable; `gemma-4-E2B-it-Q4_K_M.gguf`/`gemma-4-E4B-it-Q4_K_M.gguf` via llama.cpp for general vision | PaddleOCR (Windows hell); paid OCR (Azure DI) only on explicit user request |
-| Vision captions for figures | **Gemini API free-tier `gemma-4-31b-it,gemma-4-26b-a4b-it` round-robin, structured-output (`{type, content}`)** | llama.cpp `gemma-4-E4B-it-Q4_K_M.gguf` (~4B, fits 6 GB VRAM) for offline runs | Models matching `CAPTION_DENYLIST` substring patterns (`glm-ocr`, `lightonocr`, `deepseek-ocr`) — refused at CLI; Sonnet vision sparingly; Opus vision never |
+| Vision captions for figures | **Gemini API per-call round-robin `gemma-4-26b-a4b-it,gemma-4-31b-it`, structured-output (`{type, content}`)** — primary MoE ~5s/figure for speed + secondary dense 31b ~14s/figure for chemistry precision. Gemini hard cap is 15 RPM per model, so two-model rotation yields ~30 RPM combined. Helper retries on HTTP 429/5xx and structured-output parse failures. | llama.cpp `Qwen3.5-4B-Q4_K_M.gguf` ~4s/figure (fastest local, full GPU) or `Qwen3.5-35B-A3B-Q4_K_M.gguf` ~23s/figure (best local structure/tables, MoE `-ot exps=CPU`) | Models matching `CAPTION_DENYLIST` substring patterns (`glm-ocr`, `lightonocr`, `deepseek-ocr`) — refused at CLI; Sonnet vision sparingly; Opus vision never |
 | Heavy synthesis (NOT this skill — wiki only) | n/a | n/a | n/a |
 
 Local hardware budget today: Mobile RTX 3060 6 GB (~5.5 GB usable). Caps comfortable model size at ≈4-5B at moderate quantization. Future eGPU with RTX 3090 would lift the ceiling; the `--engine` flag and orchestration stay identical when the swap happens.
@@ -171,10 +171,15 @@ Stage 3a writes `<stem>.figures.json` (atomic) + `<stem>.assets/figure_pN_fM.png
 - 3a: `--header-fraction 0.15 --header-min-height 0.08` (drop top-band logos)
 - 3a: `--redaction-stddev 15 --redaction-mean-max 245 --min-area-px 400` (FOI `(b)(4)`)
 - 3a: `--nearby-text-max-chars 2500`
-- 3b: `--engine gemini --gemini-models gemma-4-31b-it,gemma-4-26b-a4b-it`
+- 3b: `--engine gemini --gemini-models gemma-4-26b-a4b-it,gemma-4-31b-it` (per-call round-robin; 30 RPM combined under Gemini's 15 RPM-per-model cap)
 - 3b: substance auto-inferred from `<substance>/metadata.json::inn`, then path; sidecar records `substance_source`
 
-**llama.cpp captioning** is supported but not the default - 6 GB VRAM caps comfortable model size at ~4B, and 26-31B Gemma gives better captions on complex plots. The CLI **refuses OCR-specialized models** for captioning via `CAPTION_DENYLIST` substring matching (any model id containing `glm-ocr`, `lightonocr`, or `deepseek-ocr`).
+**llama.cpp captioning** is supported but not the default. Best local choices on this hardware (benchmarked 2026-05-17 against 10 representative apalutamide figures):
+- **`Qwen3.5-4B-Q4_K_M.gguf` + `mmproj-F32.gguf`** (full GPU offload, `--reasoning off`) — ~4s/figure, 9/10 reliable, fastest local backend.
+- **`Qwen3.5-35B-A3B-Q4_K_M.gguf` + `mmproj-Qwen3.5-35B-A3B-BF16.gguf`** (MoE, launch with `-ot exps=CPU`) — ~23s/figure, 10/10 reliable, best local table fidelity + spatial reasoning + figure-title capture.
+- All local models hallucinate structural-formula chemistry through at least 35B params — for audit-grade chemistry of structural figures, use cloud `gemma-4-31b-it` (the only backend that anatomically resolves apalutamide as "thiohydantoin... cyclobutane... 4-cyano-3-(trifluoromethyl)pyridine").
+
+The CLI **refuses OCR-specialized models** for captioning via `CAPTION_DENYLIST` substring matching (any model id containing `glm-ocr`, `lightonocr`, or `deepseek-ocr`).
 
 ## Hard constraints
 

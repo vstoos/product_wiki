@@ -155,12 +155,16 @@ def _gemini_with_round_robin_structured(
 ) -> tuple[str | None, str, str]:
     """Round-robin gemini pairs in structured-output mode.
 
-    Returns (type, content, used_model). Advances pairs on HTTP 429; on
-    every-pair-exhausted raises RuntimeError. Local copy (not re-export)
-    so patch.object(caption_figure, 'transcribe_gemini_structured')
-    intercepts cleanly in tests.
+    Returns (type, content, used_model) on success. Advances to the next
+    pair on transient failures: HTTP 429 (rate limit), HTTP 5xx (server
+    error), or structured-output parse failure (t is None, often a
+    truncated JSON response). On every-pair-exhausted raises RuntimeError
+    carrying the last error.
+
+    Local copy (not re-export) so patch.object(caption_figure,
+    'transcribe_gemini_structured') intercepts cleanly in tests.
     """
-    last_429: Exception | None = None
+    last_err: Exception | None = None
     for api_key, model in pairs:
         try:
             t, c = transcribe_gemini_structured(
@@ -170,15 +174,19 @@ def _gemini_with_round_robin_structured(
                 timeout=timeout,
                 prompt=prompt,
             )
-            return t, c, model
         except urllib.error.HTTPError as e:
-            if e.code == 429:
-                last_429 = e
+            if e.code == 429 or 500 <= e.code < 600:
+                last_err = e
                 continue
             raise
+        if t is None:
+            preview = (c or "")[:160].replace("\n", " ")
+            last_err = ValueError(f"parse failed on {model!r}: {preview!r}")
+            continue
+        return t, c, model
     raise RuntimeError(
-        f"all gemini (api_key, model) pairs returned 429 ({len(pairs)} tried)"
-    ) from last_429
+        f"all gemini (api_key, model) pairs exhausted ({len(pairs)} tried); last={last_err}"
+    ) from last_err
 
 
 def _utc_today() -> str:
@@ -315,6 +323,11 @@ def process_figures(
         "budget_exhausted": False,
     }
     calls_made = 0
+    # Local working copy of backend_kwargs so per-call rotation of the
+    # gemini pairs list doesn't mutate the caller's dict. With Gemini's
+    # 15 RPM-per-model cap, rotating (k, m) pairs per call spreads load
+    # across models and yields ~30 RPM combined when two models are configured.
+    backend_kwargs = dict(backend_kwargs)
     for f in figures:
         if f.get("redacted"):
             out.append(dict(f))
@@ -347,6 +360,13 @@ def process_figures(
             stats["errored"] += 1
         else:
             stats["captioned"] += 1
+        # Per-call rotation of gemini pairs to spread RPM across both models.
+        # Rotates on every call (success OR error) so a stuck primary doesn't
+        # block secondary from getting traffic.
+        if engine == "gemini":
+            pairs = backend_kwargs.get("pairs") or []
+            if len(pairs) > 1:
+                backend_kwargs["pairs"] = pairs[1:] + pairs[:1]
     return out, stats
 
 
@@ -367,8 +387,12 @@ def main(argv: list[str] | None = None) -> int:
                         help="Gemini API key. Repeatable. Falls back to "
                              "GEMINI_API_KEY/GOOGLE_API_KEY env var.")
     parser.add_argument("--gemini-models",
-                        default="gemma-4-31b-it,gemma-4-26b-a4b-it",
-                        help="Comma-separated Gemini models for round-robin")
+                        default="gemma-4-26b-a4b-it,gemma-4-31b-it",
+                        help="Comma-separated Gemini models for per-call round-robin. "
+                             "Default puts the faster MoE (gemma-4-26b-a4b-it, ~5s/figure) "
+                             "first and the dense gemma-4-31b-it (chemistry-precision backup, "
+                             "~14s/figure) second. With 2 models the combined cap is 30 RPM "
+                             "(Gemini hard limit is 15 RPM per model).")
     parser.add_argument("--force", action="store_true",
                         help="Re-caption already-done figures; bypass freshness check")
     parser.add_argument("--accept-stale", action="store_true",

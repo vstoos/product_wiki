@@ -163,7 +163,7 @@ def transcribe_gemini(
     parts.append({"inline_data": {"mime_type": "image/png", "data": b64}})
     payload = {
         "contents": [{"parts": parts}],
-        "generationConfig": {"temperature": 0.0, "maxOutputTokens": 4096},
+        "generationConfig": {"temperature": 0.0, "maxOutputTokens": 8192},
     }
     url = GEMINI_ENDPOINT.format(model=model, api_key=api_key)
     req = urllib.request.Request(
@@ -233,7 +233,11 @@ def transcribe_llama_cpp_structured(
         "model": model,
         "messages": [{"role": "user", "content": content}],
         "temperature": 0.0,
-        "max_tokens": 16384,
+        # 8192 is generous for a {type, content} caption (3-5 sentences or a
+        # bounded HTML table) while keeping the cap small enough to fail-fast
+        # on misconfigured servers that spill weights to shared memory and
+        # generate at 1 tok/min.
+        "max_tokens": 8192,
         "response_format": {"type": "json_object"},
     }
     req = urllib.request.Request(
@@ -270,7 +274,7 @@ def transcribe_gemini_structured(
         "contents": [{"parts": parts}],
         "generationConfig": {
             "temperature": 0.0,
-            "maxOutputTokens": 4096,
+            "maxOutputTokens": 8192,
             "response_mime_type": "application/json",
             "response_schema": {
                 "type": "object",

@@ -552,11 +552,12 @@ def test_gemini_round_robin_raises_when_all_pairs_429():
     assert "all gemini" in str(ei.value).lower()
 
 
-def test_gemini_round_robin_propagates_non_429_errors():
+def test_gemini_round_robin_propagates_non_transient_errors():
+    """HTTP 4xx (other than 429) propagates - these are NOT retriable."""
     import urllib.error
 
     def fake_transcribe(image, *, api_key, model, timeout, prompt):
-        raise urllib.error.HTTPError("u", 500, "server error", None, None)
+        raise urllib.error.HTTPError("u", 400, "bad request", None, None)
 
     with patch.object(ocr_page, "transcribe_gemini", side_effect=fake_transcribe):
         with pytest.raises(urllib.error.HTTPError):
@@ -566,6 +567,29 @@ def test_gemini_round_robin_propagates_non_429_errors():
                 timeout=60,
                 prompt="x",
             )
+
+
+def test_gemini_round_robin_advances_on_5xx():
+    """HTTP 5xx is transient - advances to the next pair like 429 does."""
+    import urllib.error
+
+    pairs_seen = []
+
+    def fake_transcribe(image, *, api_key, model, timeout, prompt):
+        pairs_seen.append((api_key, model))
+        if api_key == "K1":
+            raise urllib.error.HTTPError("u", 503, "service unavailable", None, None)
+        return f"ok-from-{api_key}"
+
+    with patch.object(ocr_page, "transcribe_gemini", side_effect=fake_transcribe):
+        text = ocr_page._gemini_with_round_robin(
+            b"\x89PNG",
+            pairs=[("K1", "m1"), ("K2", "m2")],
+            timeout=60,
+            prompt="x",
+        )
+    assert text == "ok-from-K2"
+    assert pairs_seen == [("K1", "m1"), ("K2", "m2")]
 
 
 def test_cli_gemini_dispatches_to_gemini_backend(suppl11_pdf, tmp_path, monkeypatch):
