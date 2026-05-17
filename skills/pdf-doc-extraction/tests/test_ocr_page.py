@@ -89,7 +89,7 @@ class _MockResponse:
         return False
 
 
-def test_transcribe_lmstudio_sends_vision_payload():
+def test_transcribe_llama_cpp_sends_vision_payload():
     captured = {}
 
     def fake_urlopen(req, timeout=None):
@@ -99,7 +99,7 @@ def test_transcribe_lmstudio_sends_vision_payload():
         return _MockResponse({"choices": [{"message": {"content": "TRANSCRIBED"}}]})
 
     with patch("urllib.request.urlopen", side_effect=fake_urlopen):
-        result = ocr_page.transcribe_lmstudio(
+        result = ocr_page.transcribe_llama_cpp(
             b"\x89PNG\r\n\x1a\nFAKEBYTES",
             host="http://localhost:1234",
             model="glm-ocr",
@@ -118,23 +118,23 @@ def test_transcribe_lmstudio_sends_vision_payload():
     assert img_item["image_url"]["url"].startswith("data:image/png;base64,")
 
 
-def test_transcribe_lmstudio_strips_trailing_whitespace():
+def test_transcribe_llama_cpp_strips_trailing_whitespace():
     body = {"choices": [{"message": {"content": "  hello world  \n"}}]}
     with patch("urllib.request.urlopen", return_value=_MockResponse(body)):
-        result = ocr_page.transcribe_lmstudio(
+        result = ocr_page.transcribe_llama_cpp(
             b"\x89PNG", host="http://localhost:1234", model="m", timeout=60
         )
     assert result == "hello world"
 
 
-def test_transcribe_lmstudio_propagates_http_error():
+def test_transcribe_llama_cpp_propagates_http_error():
     import urllib.error
     err = urllib.error.HTTPError(
         url="x", code=503, msg="unavailable", hdrs=None, fp=None
     )
     with patch("urllib.request.urlopen", side_effect=err):
         with pytest.raises(urllib.error.HTTPError):
-            ocr_page.transcribe_lmstudio(
+            ocr_page.transcribe_llama_cpp(
                 b"\x89PNG", host="http://localhost:1234", model="m", timeout=60
             )
 
@@ -148,7 +148,7 @@ def test_process_pages_records_per_page_errors(suppl11_pdf):
             raise RuntimeError("backend exploded")
         return f"page-text-{call_count['n']}"
 
-    with patch.object(ocr_page, "transcribe_lmstudio", side_effect=fake_transcribe):
+    with patch.object(ocr_page, "transcribe_llama_cpp", side_effect=fake_transcribe):
         results = ocr_page.process_pages(
             pdf_path=suppl11_pdf,
             page_numbers=[1, 2, 3],
@@ -257,7 +257,7 @@ def test_cli_writes_ocr_json(suppl11_pdf, tmp_path):
             "--pdf", str(suppl11_pdf),
             "--extract-json", str(extract_json),
             "--out", str(tmp_path),
-            "--engine", "lmstudio",
+            "--engine", "llama-cpp",
             "--model", "glm-ocr",
             "--quiet",
         ])
@@ -266,7 +266,7 @@ def test_cli_writes_ocr_json(suppl11_pdf, tmp_path):
     ocr_json_path = tmp_path / f"{suppl11_pdf.stem}.ocr.json"
     assert ocr_json_path.exists()
     payload = _json.loads(ocr_json_path.read_text())
-    assert payload["engine"] == "lmstudio"
+    assert payload["engine"] == "llama-cpp"
     assert payload["model"] == "glm-ocr"
     assert payload["dpi"] == 200
     assert len(payload["pages"]) == 1
@@ -282,7 +282,7 @@ def test_cli_cache_skips_already_ok_pages(suppl11_pdf, tmp_path):
     ocr_json_path = tmp_path / f"{suppl11_pdf.stem}.ocr.json"
     ocr_json_path.write_text(_json.dumps({
         "source_file": suppl11_pdf.name,
-        "engine": "lmstudio",
+        "engine": "llama-cpp",
         "model": "glm-ocr",
         "host": "http://localhost:1234",
         "dpi": 200,
@@ -316,7 +316,7 @@ def test_cli_force_reprocesses_cached_page(suppl11_pdf, tmp_path):
     ocr_json_path = tmp_path / f"{suppl11_pdf.stem}.ocr.json"
     ocr_json_path.write_text(_json.dumps({
         "source_file": suppl11_pdf.name,
-        "engine": "lmstudio",
+        "engine": "llama-cpp",
         "model": "glm-ocr",
         "host": "http://localhost:1234",
         "dpi": 200,
@@ -366,7 +366,7 @@ def test_resolve_prompt_auto_default_for_general_vision():
         assert p == ocr_page.OCR_PROMPT and mode == "auto-default", f"failed for {name}"
 
 
-def test_transcribe_lmstudio_omits_text_item_when_prompt_empty():
+def test_transcribe_llama_cpp_omits_text_item_when_prompt_empty():
     captured = {}
 
     def fake_urlopen(req, timeout=None):
@@ -374,7 +374,7 @@ def test_transcribe_lmstudio_omits_text_item_when_prompt_empty():
         return _MockResponse({"choices": [{"message": {"content": "OUT"}}]})
 
     with patch("urllib.request.urlopen", side_effect=fake_urlopen):
-        ocr_page.transcribe_lmstudio(
+        ocr_page.transcribe_llama_cpp(
             b"\x89PNG", host="http://localhost:1234", model="glm-ocr",
             timeout=60, prompt="",
         )
@@ -383,7 +383,7 @@ def test_transcribe_lmstudio_omits_text_item_when_prompt_empty():
     assert types == ["image_url"], f"expected image-only, got {types}"
 
 
-def test_transcribe_lmstudio_includes_text_item_when_prompt_set():
+def test_transcribe_llama_cpp_includes_text_item_when_prompt_set():
     captured = {}
 
     def fake_urlopen(req, timeout=None):
@@ -391,7 +391,7 @@ def test_transcribe_lmstudio_includes_text_item_when_prompt_set():
         return _MockResponse({"choices": [{"message": {"content": "OUT"}}]})
 
     with patch("urllib.request.urlopen", side_effect=fake_urlopen):
-        ocr_page.transcribe_lmstudio(
+        ocr_page.transcribe_llama_cpp(
             b"\x89PNG", host="http://localhost:1234", model="m",
             timeout=60, prompt="custom-prompt",
         )
@@ -414,7 +414,7 @@ def test_check_model_loaded_warns_when_missing():
         warning = ocr_page.check_model_loaded(host="http://localhost:1234", model="glm-ocr")
     assert warning is not None
     assert "glm-ocr" in warning
-    assert "lms load" in warning
+    assert "llama-server" in warning
 
 
 def test_check_model_loaded_warns_on_network_error():
@@ -645,8 +645,8 @@ def test_cli_gemini_accepts_google_api_key_env(suppl11_pdf, tmp_path, monkeypatc
     assert "key=FROM_GOOGLE_VAR" in captured_url["url"]
 
 
-def test_lmstudio_payload_uses_higher_max_tokens(suppl11_pdf):
-    """max_tokens for LMStudio bumped to 16384 to leave headroom for thinking-token models."""
+def test_llama_cpp_payload_uses_higher_max_tokens(suppl11_pdf):
+    """max_tokens for llama-cpp bumped to 16384 to leave headroom for thinking-token models."""
     captured = {}
 
     def fake_urlopen(req, timeout=None):
@@ -654,7 +654,7 @@ def test_lmstudio_payload_uses_higher_max_tokens(suppl11_pdf):
         return _MockResponse({"choices": [{"message": {"content": "X"}}]})
 
     with patch("urllib.request.urlopen", side_effect=fake_urlopen):
-        ocr_page.transcribe_lmstudio(
+        ocr_page.transcribe_llama_cpp(
             b"\x89PNG", host="http://localhost:1234", model="glm-ocr", timeout=60,
         )
     assert captured["body"]["max_tokens"] == 16384
@@ -740,8 +740,8 @@ def test_cli_gemini_records_gemini_models_in_output(suppl11_pdf, tmp_path, monke
     assert payload["gemini_models"] == "gemma-4-31b-it,gemma-4-26b-a4b-it"
 
 
-def test_cli_lmstudio_does_not_record_gemini_models(suppl11_pdf, tmp_path):
-    """LMStudio runs should not have a stale gemini_models field."""
+def test_cli_llama_cpp_does_not_record_gemini_models(suppl11_pdf, tmp_path):
+    """llama-cpp runs should not have a stale gemini_models field."""
     body = {"choices": [{"message": {"content": "X"}}]}
     models_body = {"data": [{"id": "glm-ocr"}]}
 

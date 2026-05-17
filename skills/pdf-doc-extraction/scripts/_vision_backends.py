@@ -70,20 +70,35 @@ CAPTION_PROMPT_TEMPLATE = (
 )
 
 
-# Captioning-model denylist. Explicit set, NOT a regex (a regex like /ocr/i
-# would falsely reject a future general vision model named e.g. "vision-ocr-1").
-# The OCR_MODEL_PATTERN regex above stays in place for the Phase 2 prompt-
-# selection heuristic, where false positives are harmless.
+# Captioning-model denylist. Lowercased substring patterns, NOT a generic
+# /ocr/i regex (which would falsely reject a future general vision model
+# named e.g. "vision-ocr-1"). Substring (not exact-set) so the same patterns
+# match both LM Studio short ids (`lightonocr-2-1b-ocr-soup`) and llama.cpp
+# filenames (`LightOnOCR-2-1B-ocr-soup-BF16.gguf`). Check via
+# `is_caption_denied(model_id)`.
 CAPTION_DENYLIST = frozenset({
     "glm-ocr",
-    "lightonocr-2-1b-ocr-soup",
+    "lightonocr",
     "deepseek-ocr",
 })
+
+
+def is_caption_denied(model_id: str) -> str | None:
+    """Return the matching pattern if `model_id` is OCR-specialised, else None.
+
+    Case-insensitive substring match against CAPTION_DENYLIST. Used by
+    caption_figure.validate_captioning_model.
+    """
+    lowered = (model_id or "").lower()
+    for pattern in CAPTION_DENYLIST:
+        if pattern in lowered:
+            return pattern
+    return None
 
 GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
 
 
-def transcribe_lmstudio(
+def transcribe_llama_cpp(
     image_png_bytes: bytes,
     *,
     host: str,
@@ -91,7 +106,7 @@ def transcribe_lmstudio(
     timeout: int,
     prompt: str = OCR_PROMPT,
 ) -> str:
-    """POST the image to a local LMStudio OpenAI-compatible vision endpoint.
+    """POST the image to a local llama.cpp OpenAI-compatible vision endpoint.
 
     Returns the model's response content, stripped of leading/trailing whitespace.
     Raises on HTTP errors, network errors, and malformed responses.
@@ -193,7 +208,7 @@ def _parse_structured_response(raw_text: str) -> tuple[str | None, str]:
     return t, c
 
 
-def transcribe_lmstudio_structured(
+def transcribe_llama_cpp_structured(
     image_png_bytes: bytes,
     *,
     host: str,
@@ -201,10 +216,10 @@ def transcribe_lmstudio_structured(
     timeout: int,
     prompt: str,
 ) -> tuple[str | None, str]:
-    """Structured-output captioning via LMStudio (OpenAI-compat JSON mode).
+    """Structured-output captioning via llama.cpp (OpenAI-compat JSON mode).
 
     Returns (type, content) on a parseable {type, content} response, else
-    (None, raw_text). LMStudio's OpenAI-compat layer supports
+    (None, raw_text). llama.cpp's OpenAI-compat layer supports
     response_format={"type":"json_object"} but not arbitrary JSON Schema
     enforcement, so the schema is also stated in the prompt (which is what
     `prompt` already contains via CAPTION_PROMPT_TEMPLATE).
@@ -339,11 +354,14 @@ def check_model_loaded(*, host: str, model: str, timeout: int = 5) -> str | None
         ) as resp:
             body = json.loads(resp.read())
     except (urllib.error.URLError, urllib.error.HTTPError, OSError) as e:
-        return f"could not query {host}/v1/models ({type(e).__name__}: {e}) - is LMStudio running?"
+        return f"could not query {host}/v1/models ({type(e).__name__}: {e}) - is llama-server running on {host}?"
     loaded_ids = [m.get("id") for m in body.get("data", [])]
     if model in loaded_ids:
         return None
-    return f"model '{model}' is not loaded; loaded: {loaded_ids}. Try: lms load {model} --gpu max -y"
+    return (
+        f"model {model!r} is not loaded; loaded: {loaded_ids}. "
+        f"Restart llama-server with --model pointing at the right GGUF (one server at a time)."
+    )
 
 
 def atomic_write_json(path, payload) -> None:

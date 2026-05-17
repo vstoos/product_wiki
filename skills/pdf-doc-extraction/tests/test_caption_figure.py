@@ -77,31 +77,31 @@ def test_compute_prompt_hash_differs_for_different_input():
 # --- validate_captioning_model ---
 
 def test_validate_captioning_model_rejects_glm_ocr():
-    err = caption_figure.validate_captioning_model("lmstudio", "glm-ocr")
+    err = caption_figure.validate_captioning_model("llama-cpp", "glm-ocr")
     assert err is not None
     assert "general vision" in err.lower() or "denylist" in err.lower()
 
 
 def test_validate_captioning_model_rejects_lightonocr():
     assert caption_figure.validate_captioning_model(
-        "lmstudio", "lightonocr-2-1b-ocr-soup"
+        "llama-cpp", "lightonocr-2-1b-ocr-soup"
     ) is not None
 
 
 def test_validate_captioning_model_rejects_deepseek_ocr():
     assert caption_figure.validate_captioning_model(
-        "lmstudio", "deepseek-ocr"
+        "llama-cpp", "deepseek-ocr"
     ) is not None
 
 
 def test_validate_captioning_model_accepts_gemma_4b():
     assert caption_figure.validate_captioning_model(
-        "lmstudio", "gemma-4-e4b-it"
+        "llama-cpp", "gemma-4-e4b-it"
     ) is None
 
 
 def test_validate_captioning_model_ignores_engine_gemini():
-    """Denylist applies to LMStudio engine only (Gemini doesn't serve those models)."""
+    """Denylist applies to llama-cpp engine only (Gemini doesn't serve those models)."""
     assert caption_figure.validate_captioning_model(
         "gemini", "glm-ocr"  # nonsense for gemini but not our concern here
     ) is None
@@ -221,20 +221,20 @@ def test_caption_one_figure_skips_redacted(tmp_path):
     assert out["content_type"] == "redaction"
 
 
-def test_caption_one_figure_lmstudio_structured_success(tmp_path):
+def test_caption_one_figure_llama_cpp_structured_success(tmp_path):
     root = _seed_assets(tmp_path)
     fig = _make_figure("stem.assets/figure_p1_f1.png")
-    with patch.object(caption_figure, "transcribe_lmstudio_structured",
+    with patch.object(caption_figure, "transcribe_llama_cpp_structured",
                       return_value=("figure", "A PK plot.")):
         out = caption_figure.caption_one_figure(
             fig, assets_root=root, substance="apalutamide",
-            engine="lmstudio",
+            engine="llama-cpp",
             backend_kwargs={"host": "http://localhost:1234", "model": "gemma-4-e4b-it", "timeout": 60},
         )
     assert out["description"] == "A PK plot."
     assert out["content_type"] == "figure"
     assert out["description_tier"] == 2
-    assert out["captioner"].startswith("lmstudio:gemma-4-e4b-it@")
+    assert out["captioner"].startswith("llama-cpp:gemma-4-e4b-it@")
     assert isinstance(out["prompt_hash"], str) and len(out["prompt_hash"]) == 16
 
 
@@ -462,11 +462,11 @@ def _seed_figures_json(tmp_path: Path, *, fresh: bool = True,
     return fj, pdf
 
 
-def test_cli_refuses_ocr_specialized_lmstudio_model(tmp_path, capsys):
+def test_cli_refuses_ocr_specialized_llama_cpp_model(tmp_path, capsys):
     fj, _pdf = _seed_figures_json(tmp_path)
     rc = caption_figure.main([
         "--figures-json", str(fj),
-        "--engine", "lmstudio",
+        "--engine", "llama-cpp",
         "--model", "glm-ocr",
     ])
     assert rc == 2

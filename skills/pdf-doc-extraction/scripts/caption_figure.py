@@ -23,9 +23,10 @@ _vb_spec.loader.exec_module(_vision_backends)
 
 CAPTION_PROMPT_TEMPLATE = _vision_backends.CAPTION_PROMPT_TEMPLATE
 CAPTION_DENYLIST = _vision_backends.CAPTION_DENYLIST
+is_caption_denied = _vision_backends.is_caption_denied
 atomic_write_json = _vision_backends.atomic_write_json
 hash_thresholds = _vision_backends.hash_thresholds
-transcribe_lmstudio_structured = _vision_backends.transcribe_lmstudio_structured
+transcribe_llama_cpp_structured = _vision_backends.transcribe_llama_cpp_structured
 transcribe_gemini_structured = _vision_backends.transcribe_gemini_structured
 
 import argparse
@@ -73,17 +74,21 @@ def compute_prompt_hash(rendered_prompt: str) -> str:
 
 
 def validate_captioning_model(engine: str, model: str) -> str | None:
-    """Return error string if engine=lmstudio + model in CAPTION_DENYLIST; else None.
+    """Return error string if engine=llama-cpp + model matches CAPTION_DENYLIST; else None.
 
-    Gemini side doesn't serve those models so the check is engine-conditional.
+    Substring match (via is_caption_denied) so the same patterns catch both
+    short LM-Studio-style ids and llama.cpp GGUF filenames. Gemini side
+    doesn't serve OCR-specialised models so the check is engine-conditional.
     """
-    if engine == "lmstudio" and model in CAPTION_DENYLIST:
-        return (
-            f"refusing to use OCR-specialized model {model!r} for captioning "
-            f"(in CAPTION_DENYLIST). Use a general vision model like "
-            f"'gemma-4-e2b-it' or 'gemma-4-e4b-it' for LMStudio, or "
-            f"'gemma-4-31b-it' for the default Gemini path."
-        )
+    if engine == "llama-cpp":
+        matched = is_caption_denied(model)
+        if matched:
+            return (
+                f"refusing to use OCR-specialized model {model!r} for captioning "
+                f"(matches denylist pattern {matched!r}). Use a general vision model "
+                f"like 'gemma-4-E4B-it-Q4_K_M.gguf' for llama.cpp, or "
+                f"'gemma-4-31b-it' for the default Gemini path."
+            )
     return None
 
 
@@ -237,9 +242,9 @@ def caption_one_figure(
     today = _utc_today()
 
     try:
-        if engine == "lmstudio":
+        if engine == "llama-cpp":
             model = backend_kwargs["model"]
-            t, c = transcribe_lmstudio_structured(
+            t, c = transcribe_llama_cpp_structured(
                 image_bytes,
                 host=backend_kwargs["host"],
                 model=model,
@@ -352,11 +357,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--figures-json", type=Path, required=True)
     parser.add_argument("--substance", default=None,
                         help="Override; otherwise uses sidecar substance field.")
-    parser.add_argument("--engine", default="gemini", choices=["gemini", "lmstudio"])
+    parser.add_argument("--engine", default="gemini", choices=["gemini", "llama-cpp"])
     parser.add_argument("--model", default=None,
-                        help="LMStudio model name (default: gemma-4-e4b-it). "
-                             "Ignored with --engine gemini.")
-    parser.add_argument("--host", default="http://localhost:1234")
+                        help="llama.cpp model id (filename from /v1/models; default: "
+                             "gemma-4-E4B-it-Q4_K_M.gguf). Ignored with --engine gemini.")
+    parser.add_argument("--host", default="http://127.0.0.1:8080")
     parser.add_argument("--timeout", type=int, default=180)
     parser.add_argument("--api-key", action="append", default=None,
                         help="Gemini API key. Repeatable. Falls back to "
@@ -417,9 +422,9 @@ def main(argv: list[str] | None = None) -> int:
               file=sys.stderr)
 
     # 3. Resolve backend kwargs + denylist check
-    if args.engine == "lmstudio":
-        model = args.model or "gemma-4-e4b-it"
-        err = validate_captioning_model("lmstudio", model)
+    if args.engine == "llama-cpp":
+        model = args.model or "gemma-4-E4B-it-Q4_K_M.gguf"
+        err = validate_captioning_model("llama-cpp", model)
         if err:
             print(f"error: {err}", file=sys.stderr)
             return 2

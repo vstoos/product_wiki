@@ -1,4 +1,4 @@
-"""OCR scanned/problem pages of a PDF via LMStudio's OpenAI-compatible API.
+"""OCR scanned/problem pages of a PDF via llama.cpp's OpenAI-compatible API.
 
 Reads problem-page list from a Phase 1 <stem>.extract.json (or explicit --pages),
 renders each page to PNG, POSTs it to a local vision model, and writes
@@ -26,7 +26,7 @@ _vb_spec.loader.exec_module(_vision_backends)
 OCR_PROMPT = _vision_backends.OCR_PROMPT
 OCR_MODEL_PATTERN = _vision_backends.OCR_MODEL_PATTERN
 GEMINI_ENDPOINT = _vision_backends.GEMINI_ENDPOINT
-transcribe_lmstudio = _vision_backends.transcribe_lmstudio
+transcribe_llama_cpp = _vision_backends.transcribe_llama_cpp
 transcribe_gemini = _vision_backends.transcribe_gemini
 resolve_prompt = _vision_backends.resolve_prompt
 check_model_loaded = _vision_backends.check_model_loaded
@@ -141,9 +141,9 @@ def process_pages(
     pdf_path: Path,
     page_numbers: list[int],
     dpi: int,
-    engine: str = "lmstudio",
-    host: str = "http://localhost:1234",
-    model: str = "lightonocr-2-1b-ocr-soup",
+    engine: str = "llama-cpp",
+    host: str = "http://127.0.0.1:8080",
+    model: str = "LightOnOCR-2-1B-ocr-soup-BF16.gguf",
     timeout: int = 120,
     prompt: str = OCR_PROMPT,
     gemini_pairs: list[tuple[str, str]] | None = None,
@@ -168,7 +168,7 @@ def process_pages(
                 # Rotate after each successful call to spread load
                 pairs = pairs[1:] + pairs[:1]
             else:
-                text = transcribe_lmstudio(
+                text = transcribe_llama_cpp(
                     png, host=host, model=model, timeout=timeout, prompt=prompt
                 )
             results.append({
@@ -235,7 +235,7 @@ def _utc_now_iso() -> str:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="OCR scanned/problem pages of a PDF via LMStudio."
+        description="OCR scanned/problem pages of a PDF via llama.cpp."
     )
     parser.add_argument("--pdf", type=Path, required=True, help="Input PDF path")
     parser.add_argument(
@@ -251,11 +251,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Output directory; <stem>.ocr.json is written here",
     )
     parser.add_argument(
-        "--engine", default="lmstudio", choices=["lmstudio", "gemini"],
+        "--engine", default="llama-cpp", choices=["llama-cpp", "gemini"],
         help="OCR backend",
     )
-    parser.add_argument("--model", default="lightonocr-2-1b-ocr-soup")
-    parser.add_argument("--host", default="http://localhost:1234")
+    parser.add_argument("--model", default="LightOnOCR-2-1B-ocr-soup-BF16.gguf")
+    parser.add_argument("--host", default="http://127.0.0.1:8080")
     parser.add_argument("--dpi", type=int, default=200)
     parser.add_argument(
         "--pages",
@@ -275,7 +275,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--skip-model-check", action="store_true",
                         help="Skip the early /v1/models probe that warns if the "
-                             "requested model isn't loaded in LMStudio.")
+                             "requested model isn't loaded by llama-server.")
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument(
         "--api-key", action="append", default=None,
@@ -325,14 +325,14 @@ def main(argv: list[str] | None = None) -> int:
     to_do = pages_to_process(requested=requested, cache=cache, force=args.force)
 
     # For prompt resolution, use the actual model that will receive the request:
-    # - LMStudio engine -> args.model (default lightonocr-2-1b-ocr-soup)
-    # - Gemini engine   -> first --gemini-models entry (e.g. gemma-4-31b-it)
+    # - llama-cpp engine -> args.model (default LightOnOCR-2-1B-ocr-soup-BF16.gguf)
+    # - gemini engine    -> first --gemini-models entry (e.g. gemma-4-31b-it)
     prompt_model = (
         gemini_pairs[0][1] if args.engine == "gemini" and gemini_pairs else args.model
     )
     prompt, prompt_mode = resolve_prompt(user_prompt=args.prompt, model=prompt_model)
 
-    if to_do and args.engine == "lmstudio" and not args.skip_model_check:
+    if to_do and args.engine == "llama-cpp" and not args.skip_model_check:
         warning = check_model_loaded(host=args.host, model=args.model)
         if warning and not args.quiet:
             print(f"WARNING: {warning}", file=sys.stderr)

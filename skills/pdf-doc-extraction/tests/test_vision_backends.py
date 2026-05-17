@@ -56,7 +56,7 @@ def test_caption_denylist_is_a_set_of_strings():
 
 def test_caption_denylist_contains_known_ocr_specialists():
     assert "glm-ocr" in vb.CAPTION_DENYLIST
-    assert "lightonocr-2-1b-ocr-soup" in vb.CAPTION_DENYLIST
+    assert "lightonocr" in vb.CAPTION_DENYLIST
     assert "deepseek-ocr" in vb.CAPTION_DENYLIST
 
 
@@ -115,12 +115,12 @@ class _MockResponse:
         return False
 
 
-# --- transcribe_lmstudio_structured ---
+# --- transcribe_llama_cpp_structured ---
 
-def test_lmstudio_structured_returns_parsed_type_and_content():
+def test_llama_cpp_structured_returns_parsed_type_and_content():
     fake_body = {"choices": [{"message": {"content": '{"type":"figure","content":"A PK plot."}'}}]}
     with patch("urllib.request.urlopen", return_value=_MockResponse(fake_body)):
-        t, c = vb.transcribe_lmstudio_structured(
+        t, c = vb.transcribe_llama_cpp_structured(
             b"\x89PNG\r\n\x1a\nFAKE",
             host="http://localhost:1234",
             model="gemma-4-e4b-it",
@@ -131,11 +131,11 @@ def test_lmstudio_structured_returns_parsed_type_and_content():
     assert c == "A PK plot."
 
 
-def test_lmstudio_structured_returns_none_on_parse_failure():
+def test_llama_cpp_structured_returns_none_on_parse_failure():
     """Model emitted non-JSON text. Helper returns (None, raw_text), caller decides."""
     fake_body = {"choices": [{"message": {"content": "This is not JSON, sorry."}}]}
     with patch("urllib.request.urlopen", return_value=_MockResponse(fake_body)):
-        t, c = vb.transcribe_lmstudio_structured(
+        t, c = vb.transcribe_llama_cpp_structured(
             b"\x89PNG\r\n\x1a\nFAKE",
             host="http://localhost:1234",
             model="gemma-4-e4b-it",
@@ -146,11 +146,11 @@ def test_lmstudio_structured_returns_none_on_parse_failure():
     assert c == "This is not JSON, sorry."
 
 
-def test_lmstudio_structured_returns_none_on_schema_mismatch():
+def test_llama_cpp_structured_returns_none_on_schema_mismatch():
     """Valid JSON but missing required keys -> (None, raw)."""
     fake_body = {"choices": [{"message": {"content": '{"only_one_field":"oops"}'}}]}
     with patch("urllib.request.urlopen", return_value=_MockResponse(fake_body)):
-        t, c = vb.transcribe_lmstudio_structured(
+        t, c = vb.transcribe_llama_cpp_structured(
             b"\x89PNG\r\n\x1a\nFAKE",
             host="http://localhost:1234",
             model="gemma-4-e4b-it",
@@ -161,12 +161,12 @@ def test_lmstudio_structured_returns_none_on_schema_mismatch():
     assert '"only_one_field"' in c
 
 
-def test_lmstudio_structured_strips_markdown_fences():
+def test_llama_cpp_structured_strips_markdown_fences():
     """Common 4B-model failure mode: wraps JSON in ```json fences."""
     fenced = "```json\n{\"type\":\"figure\",\"content\":\"A plot.\"}\n```"
     fake_body = {"choices": [{"message": {"content": fenced}}]}
     with patch("urllib.request.urlopen", return_value=_MockResponse(fake_body)):
-        t, c = vb.transcribe_lmstudio_structured(
+        t, c = vb.transcribe_llama_cpp_structured(
             b"\x89PNG\r\n\x1a\nFAKE",
             host="http://localhost:1234",
             model="gemma-4-e4b-it",
@@ -177,13 +177,13 @@ def test_lmstudio_structured_strips_markdown_fences():
     assert c == "A plot."
 
 
-def test_lmstudio_structured_sends_json_object_response_format():
+def test_llama_cpp_structured_sends_json_object_response_format():
     captured = {}
     def fake_urlopen(req, timeout=None):
         captured["body"] = _json.loads(req.data.decode("utf-8"))
         return _MockResponse({"choices": [{"message": {"content": '{"type":"figure","content":"x"}'}}]})
     with patch("urllib.request.urlopen", side_effect=fake_urlopen):
-        vb.transcribe_lmstudio_structured(
+        vb.transcribe_llama_cpp_structured(
             b"FAKE", host="http://localhost:1234", model="gemma-4-e4b-it", timeout=10, prompt="hi",
         )
     assert captured["body"].get("response_format") == {"type": "json_object"}

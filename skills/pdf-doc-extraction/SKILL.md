@@ -14,8 +14,8 @@ Use the cheapest / fastest model that gets the job done. Defaults:
 | Decision | Default model | Escalate to | Never use by default |
 |---|---|---|---|
 | Per-page text vs OCR routing, engine choice, caption-or-skip | **Haiku** | Sonnet only after Haiku gives clearly wrong output twice | Opus |
-| OCR of scanned pages | **`lightonocr-2-1b-ocr-soup` via LMStudio (1B BF16, OCR-specialized, captures HTML table structure + markdown headers, ~12s/page on Mobile RTX 3060)** | `glm-ocr` (smaller/faster ~9s/page when table structure isn't needed); `deepseek-ocr` (markdown pipe-tables); Gemini API free-tier Gemma models via `--engine gemini` when local is unavailable; `gemma-4-e2b-it`/`gemma-4-e4b-it` via LMStudio for general vision | PaddleOCR (Windows hell); paid OCR (Azure DI) only on explicit user request |
-| Vision captions for figures | **Gemini API free-tier `gemma-4-31b-it,gemma-4-26b-a4b-it` round-robin, structured-output (`{type, content}`)** | LMStudio `gemma-4-e4b-it` (~4B, fits 6 GB VRAM) for offline runs | Models in `CAPTION_DENYLIST` (`glm-ocr`, `lightonocr-2-1b-ocr-soup`, `deepseek-ocr`) — refused at CLI; Sonnet vision sparingly; Opus vision never |
+| OCR of scanned pages | **`LightOnOCR-2-1B-ocr-soup-BF16.gguf` via llama.cpp (1B BF16, OCR-specialized, captures HTML table structure + markdown headers, ~12s/page on Mobile RTX 3060)** | `GLM-OCR-Q8_0.gguf` (smaller/faster ~9s/page when table structure isn't needed); `DeepSeek-OCR-Q8_0.gguf` (markdown pipe-tables); Gemini API free-tier Gemma models via `--engine gemini` when local is unavailable; `gemma-4-E2B-it-Q4_K_M.gguf`/`gemma-4-E4B-it-Q4_K_M.gguf` via llama.cpp for general vision | PaddleOCR (Windows hell); paid OCR (Azure DI) only on explicit user request |
+| Vision captions for figures | **Gemini API free-tier `gemma-4-31b-it,gemma-4-26b-a4b-it` round-robin, structured-output (`{type, content}`)** | llama.cpp `gemma-4-E4B-it-Q4_K_M.gguf` (~4B, fits 6 GB VRAM) for offline runs | Models matching `CAPTION_DENYLIST` substring patterns (`glm-ocr`, `lightonocr`, `deepseek-ocr`) — refused at CLI; Sonnet vision sparingly; Opus vision never |
 | Heavy synthesis (NOT this skill — wiki only) | n/a | n/a | n/a |
 
 Local hardware budget today: Mobile RTX 3060 6 GB (~5.5 GB usable). Caps comfortable model size at ≈4-5B at moderate quantization. Future eGPU with RTX 3090 would lift the ceiling; the `--engine` flag and orchestration stay identical when the swap happens.
@@ -38,10 +38,9 @@ The shape on disk follows the convention already established by upstream extract
 | Tool | Status | What it does |
 |---|---|---|
 | `scripts/extract_text.py` | shipped | PyMuPDF text extraction → `<stem>.md` + `<stem>.extract.json`. Flags problem pages (text < 100 chars) for a later OCR pass. |
-| `scripts/ocr_page.py` | shipped | LMStudio OCR for problem pages. Reads Phase 1's `<stem>.extract.json`, transcribes flagged pages, writes `<stem>.ocr.json`. Gemini API round-robin is Phase 2b. |
+| `scripts/ocr_page.py` | shipped | llama.cpp OCR for problem pages. Reads Phase 1's `<stem>.extract.json`, transcribes flagged pages, writes `<stem>.ocr.json`. Gemini API round-robin is the cloud fallback (Phase 2b). |
 | `scripts/extract_figures.py` | Phase 3a | Walks each page, extracts embedded figure rasters as PNGs, drops agency-logo header decorations (logged to `dropped_header_decorations[]`), detects `(b)(4)` redactions by pixel statistics, captures `page_text_verbatim` (document-ordered, Tier-1-eligible) + `nearby_text` (closest-first, captioner-context only). Atomic-write `<stem>.figures.json` + `<stem>.assets/figure_pN_fM.png`. Sidecar carries `source_pdf_sha256` + `extractor_thresholds_hash` for idempotency. |
-| `scripts/caption_figure.py` | Phase 3b | Reads `<stem>.figures.json`, verifies freshness against the sidecar's PDF + thresholds hashes (refuses stale unless `--force`/`--accept-stale`), sends each non-redacted figure PNG to a vision backend in **structured-output mode** (`{type: "figure"|"table", content: ...}`). Default backend Gemini cloud; LMStudio supported with `CAPTION_DENYLIST` enforcement (refuses `glm-ocr` / `lightonocr-2-1b-ocr-soup` / `deepseek-ocr`). Atomic write descriptions + `captioner: "engine:model@YYYY-MM-DD"` + `prompt_hash` back into the same JSON. |
-| `scripts/ensure_lmstudio.py` | shipped | Cross-shell pre-flight that starts the LMStudio server and loads a model if not already loaded. Idempotent. Wraps `lms` CLI. |
+| `scripts/caption_figure.py` | Phase 3b | Reads `<stem>.figures.json`, verifies freshness against the sidecar's PDF + thresholds hashes (refuses stale unless `--force`/`--accept-stale`), sends each non-redacted figure PNG to a vision backend in **structured-output mode** (`{type: "figure"|"table", content: ...}`). Default backend Gemini cloud; llama.cpp supported with `CAPTION_DENYLIST` substring enforcement (refuses any model id containing `glm-ocr` / `lightonocr` / `deepseek-ocr`). Atomic write descriptions + `captioner: "engine:model@YYYY-MM-DD"` + `prompt_hash` back into the same JSON. |
 | `scripts/assemble_md.py` | planned | Stitch text + OCR + figures + captions into the final `<stem>.md`. |
 
 See `README.md` for invocation; see `references/` for engine-comparison details.
@@ -79,19 +78,27 @@ Writes `<stem>.md` and `<stem>.extract.json` next to the PDF.
 
 ### OCR pass (Phase 2)
 
-Requires the **LM Studio desktop application running first** (the `lms`
-CLI is a thin client over the GUI's background daemon — `lms server start`
-fails if the GUI app isn't launched). Then one-liner pre-flight (any shell):
+Requires a **llama.cpp server running with a vision model loaded** on
+`http://127.0.0.1:8080` (default). Only one `llama-server.exe` can run at
+a time — 6 GB VRAM is the bottleneck — so OCR and captioning are serial.
+Launch via the user's wrapper at `C:\Data\llama.cpp\scripts\run-server.cmd`
+or directly:
 
-```bash
-python skills/pdf-doc-extraction/scripts/ensure_lmstudio.py
+```powershell
+& "C:\Data\llama.cpp\src\build\bin\llama-server.exe" `
+    --model  "C:\Users\vstoo\.cache\lm-studio\models\noctrex\LightOnOCR-2-1B-ocr-soup-GGUF\LightOnOCR-2-1B-ocr-soup-BF16.gguf" `
+    --mmproj "C:\Users\vstoo\.cache\lm-studio\models\noctrex\LightOnOCR-2-1B-ocr-soup-GGUF\mmproj-F32.gguf" `
+    --ctx-size 8192 --n-gpu-layers 99 --flash-attn on `
+    --cache-type-k q8_0 --cache-type-v q8_0 --threads 8 `
+    --host 127.0.0.1 --port 8080
 ```
 
-This starts the server (if down) and loads `lightonocr-2-1b-ocr-soup`
-(default — captures HTML table structure + markdown headers) with a
-10-min auto-unload TTL. Override with `--model glm-ocr` (faster, prose-only)
-or `--model gemma-4-e2b-it`. The script is idempotent and prints a clear
-error if the LM Studio GUI isn't running.
+Default model is `LightOnOCR-2-1B-ocr-soup-BF16.gguf` (captures HTML table
+structure + markdown headers, best for regulatory forms). Alternatives:
+load `GLM-OCR-Q8_0.gguf` (faster, prose-only), `DeepSeek-OCR-Q8_0.gguf`
+(markdown pipe-tables), or a general vision model like
+`gemma-4-E4B-it-Q4_K_M.gguf`. Check what's loaded with
+`curl http://127.0.0.1:8080/v1/models`.
 
 Then OCR:
 
@@ -118,7 +125,7 @@ Rerun is cache-aware: ok-status pages are skipped unless `--force`.
 Before processing, the script probes `/v1/models` and prints a warning if
 the requested model is not loaded (suppress with `--skip-model-check`).
 
-**Gemini cloud fallback (Phase 2b)** — when local LMStudio isn't available
+**Gemini cloud fallback (Phase 2b)** — when llama.cpp isn't running locally
 or you want a free-tier cloud benchmark:
 
 ```bash
@@ -167,7 +174,7 @@ Stage 3a writes `<stem>.figures.json` (atomic) + `<stem>.assets/figure_pN_fM.png
 - 3b: `--engine gemini --gemini-models gemma-4-31b-it,gemma-4-26b-a4b-it`
 - 3b: substance auto-inferred from `<substance>/metadata.json::inn`, then path; sidecar records `substance_source`
 
-**LMStudio captioning** is supported but not the default - 6 GB VRAM caps comfortable model size at ~4B, and 26-31B Gemma gives better captions on complex plots. The CLI **refuses OCR-specialized models** for captioning via explicit `CAPTION_DENYLIST` (`glm-ocr` / `lightonocr-2-1b-ocr-soup` / `deepseek-ocr`).
+**llama.cpp captioning** is supported but not the default - 6 GB VRAM caps comfortable model size at ~4B, and 26-31B Gemma gives better captions on complex plots. The CLI **refuses OCR-specialized models** for captioning via `CAPTION_DENYLIST` substring matching (any model id containing `glm-ocr`, `lightonocr`, or `deepseek-ocr`).
 
 ## Hard constraints
 

@@ -19,8 +19,7 @@ pipx install --spec . pdf-doc-extraction-cli   # future, once a console_scripts 
 | Script | Purpose | Status |
 |---|---|---|
 | `scripts/extract_text.py` | PyMuPDF text extraction → `<stem>.md` + `<stem>.extract.json` | shipped |
-| `scripts/ocr_page.py` | LMStudio OCR for problem pages | shipped |
-| `scripts/ensure_lmstudio.py` | Cross-shell pre-flight: starts server + loads model (idempotent) | shipped |
+| `scripts/ocr_page.py` | llama.cpp OCR for problem pages | shipped |
 | `scripts/extract_figures.py` | Raster + vector figures into `<stem>.assets/` + sidecar JSON with text context | shipped |
 | `scripts/caption_figure.py` | Vision-model caption per figure (structured output; default Gemini) | shipped |
 | `scripts/assemble_md.py` | Stitch text + OCR + figures + captions | planned |
@@ -37,17 +36,21 @@ Writes `output_dir/<stem>.md` and `output_dir/<stem>.extract.json`. Reads the PD
 
 ### OCR a PDF's problem pages (Phase 2)
 
-**First, launch the LM Studio desktop application.** The `lms` CLI is a
-thin client over the GUI's background daemon — `lms server start` will
-fail with a clear error if the GUI app isn't running.
+**First, launch a llama.cpp server with a vision model loaded.** Only one
+`llama-server.exe` can run at a time on this hardware (6 GB VRAM). Use the
+wrapper at `C:\Data\llama.cpp\scripts\run-server.cmd`, or launch directly:
 
-Then pre-flight (idempotent — works in any shell; starts the server if
-down, loads `lightonocr-2-1b-ocr-soup` if not already loaded, with a
-10-min auto-unload TTL):
-
-```bash
-python scripts/ensure_lmstudio.py
+```powershell
+& "C:\Data\llama.cpp\src\build\bin\llama-server.exe" `
+    --model  "C:\Users\vstoo\.cache\lm-studio\models\noctrex\LightOnOCR-2-1B-ocr-soup-GGUF\LightOnOCR-2-1B-ocr-soup-BF16.gguf" `
+    --mmproj "C:\Users\vstoo\.cache\lm-studio\models\noctrex\LightOnOCR-2-1B-ocr-soup-GGUF\mmproj-F32.gguf" `
+    --ctx-size 8192 --n-gpu-layers 99 --flash-attn on `
+    --cache-type-k q8_0 --cache-type-v q8_0 --threads 8 `
+    --host 127.0.0.1 --port 8080
 ```
+
+Confirm with `curl http://127.0.0.1:8080/v1/models` (the id you pass to
+`--model` below must match what `/v1/models` returns).
 
 Then OCR:
 
@@ -58,17 +61,18 @@ python scripts/ocr_page.py \
   --out apalutamide/FDA/
 ```
 
-Default model is `lightonocr-2-1b-ocr-soup` (1B BF16, OCR-specialized,
-captures HTML table structure + markdown headers — best for regulatory
-forms). Alternatives: `--model glm-ocr` (faster, prose-only) or
-`--model deepseek-ocr` (markdown pipe-tables). For OCR-specialized models
-the request is image-only (no instruction prompt) — instructions can
-confuse single-task OCR models. General vision models (e.g. `gemma-4-e2b-it`)
-get the full `OCR_PROMPT`. Override with `--prompt "..."`.
+Default model id is `LightOnOCR-2-1B-ocr-soup-BF16.gguf` (1B BF16,
+OCR-specialized, captures HTML table structure + markdown headers — best
+for regulatory forms). Alternatives: `--model GLM-OCR-Q8_0.gguf` (faster,
+prose-only) or `--model DeepSeek-OCR-Q8_0.gguf` (markdown pipe-tables).
+For OCR-specialized models the request is image-only (no instruction
+prompt) — instructions can confuse single-task OCR models. General vision
+models (e.g. `gemma-4-E2B-it-Q4_K_M.gguf`) get the full `OCR_PROMPT`.
+Override with `--prompt "..."`.
 
 ### Cloud OCR via Gemini (Phase 2b)
 
-When LMStudio isn't available:
+When llama.cpp isn't running locally (or to benchmark cloud quality):
 
 ```bash
 export GEMINI_API_KEY=...
@@ -100,6 +104,6 @@ python scripts/caption_figure.py \
   --check-stale
 ```
 
-Outputs: `<stem>.figures.json` + `<stem>.assets/figure_p*_f*.png`. The captioner refuses OCR-specialized models - pass a general vision model (`gemma-4-31b-it` for Gemini, `gemma-4-e4b-it` for LMStudio).
+Outputs: `<stem>.figures.json` + `<stem>.assets/figure_p*_f*.png`. The captioner refuses OCR-specialized models (substring patterns `glm-ocr`/`lightonocr`/`deepseek-ocr`) — pass a general vision model (`gemma-4-31b-it` for Gemini, `gemma-4-E4B-it-Q4_K_M.gguf` for llama.cpp).
 
 See `SKILL.md` for the agent-facing contract.
