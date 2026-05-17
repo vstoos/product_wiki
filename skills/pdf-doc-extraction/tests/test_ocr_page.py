@@ -466,13 +466,13 @@ def test_transcribe_gemini_sends_inline_data_payload():
         result = ocr_page.transcribe_gemini(
             b"\x89PNG_FAKE",
             api_key="KEY123",
-            model="gemma-3-27b-it",
+            model="gemma-4-31b-it",
             timeout=60,
             prompt="describe",
         )
     assert result == "OCR_TEXT"
     assert "generativelanguage.googleapis.com" in captured["url"]
-    assert "gemma-3-27b-it:generateContent" in captured["url"]
+    assert "gemma-4-31b-it:generateContent" in captured["url"]
     assert "key=KEY123" in captured["url"]
     parts = captured["body"]["contents"][0]["parts"]
     text_parts = [p for p in parts if "text" in p]
@@ -587,7 +587,7 @@ def test_cli_gemini_dispatches_to_gemini_backend(suppl11_pdf, tmp_path, monkeypa
             "--pages", "1",
             "--out", str(tmp_path),
             "--engine", "gemini",
-            "--gemini-models", "gemma-3-27b-it",
+            "--gemini-models", "gemma-4-31b-it",
             "--skip-model-check",
             "--quiet",
         ])
@@ -608,7 +608,7 @@ def test_cli_gemini_requires_api_key(suppl11_pdf, tmp_path, monkeypatch, capsys)
         "--pages", "1",
         "--out", str(tmp_path),
         "--engine", "gemini",
-        "--gemini-models", "gemma-3-27b-it",
+        "--gemini-models", "gemma-4-31b-it",
         "--skip-model-check",
         "--quiet",
     ])
@@ -637,7 +637,7 @@ def test_cli_gemini_accepts_google_api_key_env(suppl11_pdf, tmp_path, monkeypatc
             "--pages", "1",
             "--out", str(tmp_path),
             "--engine", "gemini",
-            "--gemini-models", "gemma-3-27b-it",
+            "--gemini-models", "gemma-4-31b-it",
             "--skip-model-check",
             "--quiet",
         ])
@@ -678,7 +678,7 @@ def test_cli_gemini_requires_models(suppl11_pdf, tmp_path, monkeypatch, capsys):
 def test_cli_gemini_uses_first_gemini_model_for_prompt_resolution(suppl11_pdf, tmp_path, monkeypatch):
     """Prompt mode is decided against the actual model that will receive the request.
 
-    With --engine gemini and --gemini-models gemma-3-27b-it, prompt_mode must be
+    With --engine gemini and --gemini-models gemma-4-31b-it, prompt_mode must be
     'auto-default' (general vision -> use OCR_PROMPT) even though --model still
     defaults to glm-ocr (which never reaches the wire).
     """
@@ -699,7 +699,7 @@ def test_cli_gemini_uses_first_gemini_model_for_prompt_resolution(suppl11_pdf, t
             "--pages", "1",
             "--out", str(tmp_path),
             "--engine", "gemini",
-            "--gemini-models", "gemma-3-27b-it",
+            "--gemini-models", "gemma-4-31b-it",
             "--skip-model-check",
             "--quiet",
         ])
@@ -731,13 +731,13 @@ def test_cli_gemini_records_gemini_models_in_output(suppl11_pdf, tmp_path, monke
             "--pages", "1",
             "--out", str(tmp_path),
             "--engine", "gemini",
-            "--gemini-models", "gemma-3-27b-it,gemma-3-12b-it",
+            "--gemini-models", "gemma-4-31b-it,gemma-4-26b-a4b-it",
             "--skip-model-check",
             "--quiet",
         ])
     assert rc == 0
     payload = _json.loads((tmp_path / f"{suppl11_pdf.stem}.ocr.json").read_text())
-    assert payload["gemini_models"] == "gemma-3-27b-it,gemma-3-12b-it"
+    assert payload["gemini_models"] == "gemma-4-31b-it,gemma-4-26b-a4b-it"
 
 
 def test_cli_lmstudio_does_not_record_gemini_models(suppl11_pdf, tmp_path):

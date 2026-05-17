@@ -286,7 +286,7 @@ def main(argv: list[str] | None = None) -> int:
         "--gemini-models",
         default=None,
         help="Comma-separated Gemini model names (required for --engine gemini). "
-             "Example: 'gemma-3-27b-it,gemma-3-12b-it'.",
+             "Example: 'gemma-4-31b-it,gemma-4-26b-a4b-it'.",
     )
     args = parser.parse_args(argv)
 
@@ -326,7 +326,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # For prompt resolution, use the actual model that will receive the request:
     # - LMStudio engine -> args.model (default lightonocr-2-1b-ocr-soup)
-    # - Gemini engine   -> first --gemini-models entry (e.g. gemma-3-27b-it)
+    # - Gemini engine   -> first --gemini-models entry (e.g. gemma-4-31b-it)
     prompt_model = (
         gemini_pairs[0][1] if args.engine == "gemini" and gemini_pairs else args.model
     )

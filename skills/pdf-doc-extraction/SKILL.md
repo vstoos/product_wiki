@@ -128,7 +128,7 @@ python skills/pdf-doc-extraction/scripts/ocr_page.py \
   --extract-json <substance>/<AGENCY>/<file>.extract.json \
   --out <substance>/<AGENCY>/ \
   --engine gemini \
-  --gemini-models "gemma-3-27b-it,gemma-3-12b-it"
+  --gemini-models "gemma-4-31b-it,gemma-4-26b-a4b-it"
 ```
 
 The (key, model) cross-product is rotated per page to spread load. On HTTP

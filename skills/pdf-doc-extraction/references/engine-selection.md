@@ -49,7 +49,7 @@ Env vars:
 ```
 GOOGLE_API_KEY=...          # for Gemini API path
 OPENROUTER_API_KEY=...      # for OpenRouter path
-GEMMA_OCR_MODEL=gemma-4-31b-it     # which Gemma variant; also gemma-4-26b-a4b-it, gemma-3-27b-it
+GEMMA_OCR_MODEL=gemma-4-31b-it     # which Gemma variant; also gemma-4-26b-a4b-it
 ```
 
 ### PaddleOCR-VL

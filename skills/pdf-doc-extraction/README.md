@@ -76,7 +76,7 @@ python scripts/ocr_page.py \
   --pdf apalutamide/FDA/<file>.pdf \
   --extract-json apalutamide/FDA/<file>.extract.json \
   --out apalutamide/FDA/ \
-  --engine gemini --gemini-models "gemma-3-27b-it,gemma-3-12b-it"
+  --engine gemini --gemini-models "gemma-4-31b-it,gemma-4-26b-a4b-it"
 ```
 
 Pass `--api-key` multiple times to round-robin across multiple keys for
