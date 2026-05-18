@@ -3,6 +3,7 @@ page_type: special_populations
 substance: apalutamide
 confidence: multi-source
 source_count: 4
+staled: false
 last_updated: 2026-05-18
 ---
 

@@ -90,22 +90,18 @@ The back-calculated intra-subject CV% values above are derived from a small (N=1
 The EMA EPAR provides direct numerical estimates that confirm and refine the back-calculation in the previous section:
 
 - **Overall CHMP characterization:** "PK of apalutamide is characterized by low to moderate intrasubject and intersubject variability (<30%)."
-  - [[sources/erleada-erleada-epar-public-assessment-report-hybrid|EMA EPAR]] [EMEA-H-C-004452-EPAR | EPAR Assessment | Section 2.4.2 — Intra- and inter-individual variability | p.47]
-  - Verbatim: "PK of apalutamide is characterized by low to moderate intrasubject and intersubject variability (<30%)."
-
+  - See [[evidence/pharmacokinetics]] §EMA EPAR multi-source confirmation for the underlying Tier 1 fact and bracket-pipe source ref.
 - **Inter-subject variability (N-desmethyl apalutamide, population PK estimate):**
   - AUC0-24,ss: 19.7%
   - Cmin: 19.7%
   - Cmax: 19.6%
-  - [[sources/erleada-erleada-epar-public-assessment-report-hybrid|EMA EPAR]] [EMEA-H-C-004452-EPAR | EPAR Assessment | Section 2.4.2 — Intra- and inter-individual variability | p.47]
-  - Verbatim: "the intersubject variability for N-desmethyl apalutamide was estimated to be low (19.7%, 19.7%, and 19.6% for AUC0-24,ss, Cmin, and Cmax, respectively)"
-
+  - See [[evidence/pharmacokinetics]] and [[evidence/special_populations]] for the underlying Tier 1 facts.
 - **Inter-subject CV% by PK structural parameter (apalutamide, EMA Table 8 final model):**
   - Inducible clearance CL_/F: 19.1%
   - Volume of central compartment V/F: 230%
   - Inter-compartmental clearance Q/F: 34.6%
   - **Residual unexplained variability:** 22.6% for apalutamide, 15.0% for N-desmethyl apalutamide.
-  - [[sources/erleada-erleada-epar-public-assessment-report-hybrid|EMA EPAR]] [EMEA-H-C-004452-EPAR | EPAR Assessment | Section 2.4.2 — Population PK Table 8 | p.48]
+  - See [[evidence/pharmacokinetics]] for the underlying Tier 1 facts and bracket-pipe source ref.
 
 - **Population covariate effects on apalutamide AUC (90% CIs):**
   | Covariate | GMR | 90% CI | N |
@@ -149,7 +145,7 @@ The post-approval pivotal BE study PCR1028 (submitted with EMA Extension X/0028/
 2. **AUC intra-subject CV ≈ 5–6%** (consistent across PCR1028 Parts 1 and 2; lower than my back-calculation suggested).
 3. The back-calculated AUC intra-CV of ~9.5% from the original food-effect substudy (N=12) **over-estimated** the true intra-CV — likely because that small-N estimate was inflated by both genuine intra-subject variability and small-sample uncertainty in the variance estimate. The 65-subject PCR1028 measurement is the higher-confidence value.
 
-Source: [[sources/erleada-erleada-h-c-004452-x-0028-g-epar-assessment-report-extension-hybrid|EMA EPAR Extension X/0028/G]] [EMEA-H-C-004452-X-0028-G | EPAR Assessment - Extension | Section 2.6.3 — Study 56021927PCR1028 results Tables 5 + 6 | p.28]
+Source: see [[evidence/bioequivalence]] §"Post-approval BE studies" — that page carries the bracket-pipe source ref `[EMEA-H-C-004452-X-0028-G | EPAR Assessment - Extension | Section 2.6.3 | p.28]` to the EMA EPAR Extension X/0028/G dossier.
 
 ### Revised sample-size estimates for generic BE planning
 

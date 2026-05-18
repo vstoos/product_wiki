@@ -2,7 +2,7 @@
 page_type: solubility
 substance: apalutamide
 confidence: multi-source
-source_count: 3
+source_count: 2
 staled: false
 last_updated: 2026-05-18
 ---

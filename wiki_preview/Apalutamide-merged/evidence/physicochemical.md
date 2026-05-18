@@ -2,7 +2,7 @@
 page_type: physicochemical
 substance: apalutamide
 confidence: multi-source
-source_count: 4
+source_count: 3
 staled: false
 last_updated: 2026-05-18
 ---
