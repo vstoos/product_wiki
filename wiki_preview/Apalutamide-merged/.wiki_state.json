@@ -1,0 +1,643 @@
+{
+  "erleada-erleada-h-c-004452-x-0028-g-epar-assessment-report-extension-hybrid": {
+    "doc_filename": "Erleada_-_Erleada-H-C-004452-X-0028-G___EPAR_-_Assessment_report_-_Extension.pdf",
+    "agency": "EMA",
+    "sha256": "91e47b972c7e4fdd39d249ba0ab112f9ecae36f95d1014c62d3f7614797eb46e",
+    "classification": {
+      "source_agency": "EMA",
+      "review_type": "EPAR Assessment - Extension",
+      "substance_inn": "apalutamide",
+      "product_names": [
+        "Erleada"
+      ],
+      "document_id": "EMEA-H-C-004452-X-0028-G"
+    },
+    "staged_at": "2026-05-18T06:21:47Z",
+    "source_pdf_path": "apalutamide\\EMA\\Erleada_-_Erleada-H-C-004452-X-0028-G___EPAR_-_Assessment_report_-_Extension.pdf"
+  },
+  "erleada-erleada-h-c-4452-ii-0001-epar-assessment-report-variation-hybrid": {
+    "doc_filename": "Erleada_-_Erleada-H-C-4452-II-0001___EPAR_-_Assessment_Report_-_Variation.pdf",
+    "agency": "EMA",
+    "sha256": "f9393500cf7fe4581002b68d8394354a5927cbfb1eb643a025cb1fa5df53b7ef",
+    "classification": {
+      "source_agency": "EMA",
+      "review_type": "EPAR Assessment - Variation",
+      "substance_inn": "apalutamide",
+      "product_names": [
+        "Erleada"
+      ],
+      "document_id": "EMEA-H-C-4452-II-0001"
+    },
+    "staged_at": "2026-05-18T06:21:50Z",
+    "source_pdf_path": "apalutamide\\EMA\\Erleada_-_Erleada-H-C-4452-II-0001___EPAR_-_Assessment_Report_-_Variation.pdf"
+  },
+  "erleada-erleada-epar-product-information-hybrid": {
+    "doc_filename": "Erleada_-_Erleada___EPAR_-_Product_information.pdf",
+    "agency": "EMA",
+    "sha256": "c028aa318e9fa0815b64b1a49268acac15b5aaf39381fa6fb7e8beff8d07998e",
+    "classification": {
+      "source_agency": "EMA",
+      "review_type": "EPAR Product Information",
+      "substance_inn": "apalutamide",
+      "product_names": [
+        "Erleada"
+      ],
+      "document_id": "EMEA-H-C-004452-PI"
+    },
+    "staged_at": "2026-05-18T06:21:51Z",
+    "source_pdf_path": "apalutamide\\EMA\\Erleada_-_Erleada___EPAR_-_Product_information.pdf"
+  },
+  "erleada-erleada-epar-public-assessment-report-hybrid": {
+    "doc_filename": "Erleada_-_Erleada___EPAR_-_Public_assessment_report.pdf",
+    "agency": "EMA",
+    "sha256": "334392509fa22e4659b57c15a808555691ddeaf5417e034fc8cfc52775153c17",
+    "classification": {
+      "source_agency": "EMA",
+      "review_type": "EPAR Assessment",
+      "substance_inn": "apalutamide",
+      "product_names": [
+        "Erleada"
+      ],
+      "document_id": "EMEA-H-C-004452-EPAR"
+    },
+    "staged_at": "2026-05-18T06:21:55Z",
+    "source_pdf_path": "apalutamide\\EMA\\Erleada_-_Erleada___EPAR_-_Public_assessment_report.pdf"
+  },
+  "210951orig1s000chemr-hybrid": {
+    "doc_filename": "210951Orig1s000ChemR.pdf",
+    "agency": "FDA",
+    "sha256": "5f3997c75fdbbda3e22b4963a8b2fe179a823f393d73dcebe4ec08efe0922f0d",
+    "classification": {
+      "source_agency": "FDA",
+      "review_type": "Chemistry/Product Quality Review",
+      "substance_inn": "apalutamide",
+      "product_names": [
+        "Erleada"
+      ],
+      "document_id": "NDA-210951-ChemR"
+    },
+    "staged_at": "2026-05-18T06:21:55Z",
+    "source_pdf_path": "apalutamide\\FDA\\210951Orig1s000ChemR.pdf"
+  },
+  "210951orig1s000multidiscipliner-hybrid": {
+    "doc_filename": "210951Orig1s000MultidisciplineR.pdf",
+    "agency": "FDA",
+    "sha256": "d0fbe5cbd7e685f70d7d22035e2e95a03ee7e6074068a477d1fe043beb4b4777",
+    "classification": {
+      "source_agency": "FDA",
+      "review_type": "Multidisciplinary Review",
+      "substance_inn": "apalutamide",
+      "product_names": [
+        "Erleada"
+      ],
+      "document_id": "NDA-210951-MultiR"
+    },
+    "staged_at": "2026-05-18T06:21:57Z",
+    "source_pdf_path": "apalutamide\\FDA\\210951Orig1s000MultidisciplineR.pdf",
+    "re_assembled_at": "2026-05-18T08:50:00Z"
+  },
+  "dailymed-label-d1cda4f7-cb33-46ea-b9ac-431f6452b1a5-hybrid": {
+    "doc_filename": "DailyMed_label_d1cda4f7-cb33-46ea-b9ac-431f6452b1a5.pdf",
+    "agency": "FDA",
+    "sha256": "32f09842854cad0b2a1d05595201733d7b29199b128ec1a7221897065025e0de",
+    "classification": {
+      "source_agency": "FDA",
+      "review_type": "Labeling",
+      "substance_inn": "apalutamide",
+      "product_names": [
+        "Erleada"
+      ],
+      "document_id": "DailyMed-Erleada"
+    },
+    "staged_at": "2026-05-18T06:21:57Z",
+    "source_pdf_path": "apalutamide\\FDA\\DailyMed_label_d1cda4f7-cb33-46ea-b9ac-431f6452b1a5.pdf"
+  },
+  "psg-210951-hybrid": {
+    "doc_filename": "PSG_210951.pdf",
+    "agency": "FDA",
+    "sha256": "c3bb887c2b46ad004ea4550e63bf8fb2e18769b30fbda8d698e56ab9310fd53d",
+    "classification": {
+      "source_agency": "FDA",
+      "review_type": "Product-Specific Guidance",
+      "substance_inn": "apalutamide",
+      "product_names": [
+        "Erleada"
+      ],
+      "document_id": "PSG-210951"
+    },
+    "staged_at": "2026-05-18T06:21:57Z",
+    "source_pdf_path": "apalutamide\\FDA\\PSG_210951.pdf"
+  },
+  "suppl-001-210951orig1s001ltr-hybrid": {
+    "doc_filename": "SUPPL_001_210951Orig1s001ltr.pdf",
+    "agency": "FDA",
+    "sha256": "faec1173f517b03cbefee9bcb81c134c77e1a2546f7f9e828b2a739b813f3879",
+    "classification": {
+      "source_agency": "FDA",
+      "review_type": "Approval Letter",
+      "substance_inn": "apalutamide",
+      "product_names": [
+        "Erleada"
+      ],
+      "document_id": "NDA-210951-S001-LTR"
+    },
+    "staged_at": "2026-05-18T06:21:57Z",
+    "source_pdf_path": "apalutamide\\FDA\\SUPPL_001_210951Orig1s001ltr.pdf"
+  },
+  "suppl-001-210951s001lbl-hybrid": {
+    "doc_filename": "SUPPL_001_210951s001lbl.pdf",
+    "agency": "FDA",
+    "sha256": "bedb61a94b2e0d0cecea91a999f0280c272f252db592064f0989f95a2b8b5aad",
+    "classification": {
+      "source_agency": "FDA",
+      "review_type": "Labeling",
+      "substance_inn": "apalutamide",
+      "product_names": [
+        "Erleada"
+      ],
+      "document_id": "NDA-210951-S001-LBL"
+    },
+    "staged_at": "2026-05-18T06:21:57Z",
+    "source_pdf_path": "apalutamide\\FDA\\SUPPL_001_210951s001lbl.pdf"
+  },
+  "suppl-002-210951orig1s002ltr-hybrid": {
+    "doc_filename": "SUPPL_002_210951Orig1s002ltr.pdf",
+    "agency": "FDA",
+    "sha256": "786da72ce61cbea0bc8d3c45dc079d2f5695bbb345b8e14ed319d1f6227c47c8",
+    "classification": {
+      "source_agency": "FDA",
+      "review_type": "Approval Letter",
+      "substance_inn": "apalutamide",
+      "product_names": [
+        "Erleada"
+      ],
+      "document_id": "NDA-210951-S002-LTR"
+    },
+    "staged_at": "2026-05-18T06:21:57Z",
+    "source_pdf_path": "apalutamide\\FDA\\SUPPL_002_210951Orig1s002ltr.pdf"
+  },
+  "suppl-002-210951s002lbl-hybrid": {
+    "doc_filename": "SUPPL_002_210951s002lbl.pdf",
+    "agency": "FDA",
+    "sha256": "eff3e9da4467d16d0bab9d41ddc5b943c174918e7545d8263f815fa2fd6f9a13",
+    "classification": {
+      "source_agency": "FDA",
+      "review_type": "Labeling",
+      "substance_inn": "apalutamide",
+      "product_names": [
+        "Erleada"
+      ],
+      "document_id": "NDA-210951-S002-LBL"
+    },
+    "staged_at": "2026-05-18T06:21:57Z",
+    "source_pdf_path": "apalutamide\\FDA\\SUPPL_002_210951s002lbl.pdf"
+  },
+  "suppl-003-210951orig1s003ltr-hybrid": {
+    "doc_filename": "SUPPL_003_210951Orig1s003ltr.pdf",
+    "agency": "FDA",
+    "sha256": "525445eceb02e77b8ef38de56638130a8ee1120dd7ccbaedb7ddf85494b28733",
+    "classification": {
+      "source_agency": "FDA",
+      "review_type": "Approval Letter",
+      "substance_inn": "apalutamide",
+      "product_names": [
+        "Erleada"
+      ],
+      "document_id": "NDA-210951-S003-LTR"
+    },
+    "staged_at": "2026-05-18T06:21:57Z",
+    "source_pdf_path": "apalutamide\\FDA\\SUPPL_003_210951Orig1s003ltr.pdf"
+  },
+  "suppl-003-210951s003lbl-hybrid": {
+    "doc_filename": "SUPPL_003_210951s003lbl.pdf",
+    "agency": "FDA",
+    "sha256": "dfd412af01d14f770b08371a143bc3e114fa34739d449291a8d5cc06002823b4",
+    "classification": {
+      "source_agency": "FDA",
+      "review_type": "Labeling",
+      "substance_inn": "apalutamide",
+      "product_names": [
+        "Erleada"
+      ],
+      "document_id": "NDA-210951-S003-LBL"
+    },
+    "staged_at": "2026-05-18T06:21:57Z",
+    "source_pdf_path": "apalutamide\\FDA\\SUPPL_003_210951s003lbl.pdf"
+  },
+  "suppl-004-210951orig1s004ltr-hybrid": {
+    "doc_filename": "SUPPL_004_210951Orig1s004ltr.pdf",
+    "agency": "FDA",
+    "sha256": "dc934aa1e62d87df20516639ec90206d2cfda6fc3cd4aa87bcb37e73d9de8115",
+    "classification": {
+      "source_agency": "FDA",
+      "review_type": "Approval Letter",
+      "substance_inn": "apalutamide",
+      "product_names": [
+        "Erleada"
+      ],
+      "document_id": "NDA-210951-S004-LTR"
+    },
+    "staged_at": "2026-05-18T06:21:57Z",
+    "source_pdf_path": "apalutamide\\FDA\\SUPPL_004_210951Orig1s004ltr.pdf"
+  },
+  "suppl-004-210951s004lbl-hybrid": {
+    "doc_filename": "SUPPL_004_210951s004lbl.pdf",
+    "agency": "FDA",
+    "sha256": "b48b74dd0ee4b7468483691aaca1462f9e117113141d06e2d186f39e509b9c3a",
+    "classification": {
+      "source_agency": "FDA",
+      "review_type": "Labeling",
+      "substance_inn": "apalutamide",
+      "product_names": [
+        "Erleada"
+      ],
+      "document_id": "NDA-210951-S004-LBL"
+    },
+    "staged_at": "2026-05-18T06:21:57Z",
+    "source_pdf_path": "apalutamide\\FDA\\SUPPL_004_210951s004lbl.pdf"
+  },
+  "suppl-005-210951orig1s005ltr-hybrid": {
+    "doc_filename": "SUPPL_005_210951Orig1s005ltr.pdf",
+    "agency": "FDA",
+    "sha256": "e7ca0ae07f20d7531fe55b6f0189ef30a216a241f86ab3db8c95342484a406b2",
+    "classification": {
+      "source_agency": "FDA",
+      "review_type": "Approval Letter",
+      "substance_inn": "apalutamide",
+      "product_names": [
+        "Erleada"
+      ],
+      "document_id": "NDA-210951-S005-LTR"
+    },
+    "staged_at": "2026-05-18T06:21:57Z",
+    "source_pdf_path": "apalutamide\\FDA\\SUPPL_005_210951Orig1s005ltr.pdf"
+  },
+  "suppl-005-210951s005lbl-hybrid": {
+    "doc_filename": "SUPPL_005_210951s005lbl.pdf",
+    "agency": "FDA",
+    "sha256": "221223fa7578da96f353c97da7f76cf870805c69a30169f4c4aad93d6bce9ba3",
+    "classification": {
+      "source_agency": "FDA",
+      "review_type": "Labeling",
+      "substance_inn": "apalutamide",
+      "product_names": [
+        "Erleada"
+      ],
+      "document_id": "NDA-210951-S005-LBL"
+    },
+    "staged_at": "2026-05-18T06:21:57Z",
+    "source_pdf_path": "apalutamide\\FDA\\SUPPL_005_210951s005lbl.pdf"
+  },
+  "suppl-006-210951orig1s006ltr-hybrid": {
+    "doc_filename": "SUPPL_006_210951Orig1s006ltr.pdf",
+    "agency": "FDA",
+    "sha256": "5705b7e9bc8b5746362057b4d06913a9c9332db5f7056bc9451b830fc4bb394f",
+    "classification": {
+      "source_agency": "FDA",
+      "review_type": "Approval Letter",
+      "substance_inn": "apalutamide",
+      "product_names": [
+        "Erleada"
+      ],
+      "document_id": "NDA-210951-S006-LTR"
+    },
+    "staged_at": "2026-05-18T06:21:57Z",
+    "source_pdf_path": "apalutamide\\FDA\\SUPPL_006_210951Orig1s006ltr.pdf"
+  },
+  "suppl-006-210951s006lbl-hybrid": {
+    "doc_filename": "SUPPL_006_210951s006lbl.pdf",
+    "agency": "FDA",
+    "sha256": "0d30304bbe6b5d5354b54a7c9e262656f730a3f53b9cb051a1ed89ea99d7f416",
+    "classification": {
+      "source_agency": "FDA",
+      "review_type": "Labeling",
+      "substance_inn": "apalutamide",
+      "product_names": [
+        "Erleada"
+      ],
+      "document_id": "NDA-210951-S006-LBL"
+    },
+    "staged_at": "2026-05-18T06:21:57Z",
+    "source_pdf_path": "apalutamide\\FDA\\SUPPL_006_210951s006lbl.pdf"
+  },
+  "suppl-007-210951orig1s007ltr-hybrid": {
+    "doc_filename": "SUPPL_007_210951Orig1s007ltr.pdf",
+    "agency": "FDA",
+    "sha256": "e05d3e9aa0bf7768552ebbc7459df62dd9f0f1454f33860549fdf052a4c3bdb0",
+    "classification": {
+      "source_agency": "FDA",
+      "review_type": "Approval Letter",
+      "substance_inn": "apalutamide",
+      "product_names": [
+        "Erleada"
+      ],
+      "document_id": "NDA-210951-S007-LTR"
+    },
+    "staged_at": "2026-05-18T06:21:57Z",
+    "source_pdf_path": "apalutamide\\FDA\\SUPPL_007_210951Orig1s007ltr.pdf"
+  },
+  "suppl-007-210951s007lbl-hybrid": {
+    "doc_filename": "SUPPL_007_210951s007lbl.pdf",
+    "agency": "FDA",
+    "sha256": "9eb0c19bb93c2b7954dbd67024e9b17bde5f9549632a63c1021ee7fd3be2cf03",
+    "classification": {
+      "source_agency": "FDA",
+      "review_type": "Labeling",
+      "substance_inn": "apalutamide",
+      "product_names": [
+        "Erleada"
+      ],
+      "document_id": "NDA-210951-S007-LBL"
+    },
+    "staged_at": "2026-05-18T06:21:57Z",
+    "source_pdf_path": "apalutamide\\FDA\\SUPPL_007_210951s007lbl.pdf"
+  },
+  "suppl-009-210951-hybrid": {
+    "doc_filename": "SUPPL_009_210951.pdf",
+    "agency": "FDA",
+    "sha256": "5f20899c5820b1b39f91f07ec6e12b662fff0500183e28dc53a65f19f1f5c8fe",
+    "classification": {
+      "source_agency": "FDA",
+      "review_type": "Other",
+      "substance_inn": "apalutamide",
+      "product_names": [
+        "Erleada"
+      ],
+      "document_id": "NDA-210951-SUPPL_009_210951.pdf"
+    },
+    "staged_at": "2026-05-18T06:21:57Z",
+    "source_pdf_path": "apalutamide\\FDA\\SUPPL_009_210951.pdf"
+  },
+  "suppl-009-210951s009s010lbl-hybrid": {
+    "doc_filename": "SUPPL_009_210951s009s010lbl.pdf",
+    "agency": "FDA",
+    "sha256": "f1beeaa491d97f7793d7bd5f60d9871dceb1f19ee84784b04bfa399093ff1fe1",
+    "classification": {
+      "source_agency": "FDA",
+      "review_type": "Labeling",
+      "substance_inn": "apalutamide",
+      "product_names": [
+        "Erleada"
+      ],
+      "document_id": "NDA-210951-S009-LBL"
+    },
+    "staged_at": "2026-05-18T06:21:57Z",
+    "source_pdf_path": "apalutamide\\FDA\\SUPPL_009_210951s009s010lbl.pdf"
+  },
+  "suppl-010-210951-hybrid": {
+    "doc_filename": "SUPPL_010_210951.pdf",
+    "agency": "FDA",
+    "sha256": "d96c3eb1badc7af3db197ac56106fe513837fbe64f715dc74c5309130f6e1746",
+    "classification": {
+      "source_agency": "FDA",
+      "review_type": "Other",
+      "substance_inn": "apalutamide",
+      "product_names": [
+        "Erleada"
+      ],
+      "document_id": "NDA-210951-SUPPL_010_210951.pdf"
+    },
+    "staged_at": "2026-05-18T06:21:57Z",
+    "source_pdf_path": "apalutamide\\FDA\\SUPPL_010_210951.pdf"
+  },
+  "suppl-010-210951s009s010lbl-hybrid": {
+    "doc_filename": "SUPPL_010_210951s009s010lbl.pdf",
+    "agency": "FDA",
+    "sha256": "93faf7149610aaaeedda8653a63c455a7273f9cbfb2c2115615849fb7574495d",
+    "classification": {
+      "source_agency": "FDA",
+      "review_type": "Labeling",
+      "substance_inn": "apalutamide",
+      "product_names": [
+        "Erleada"
+      ],
+      "document_id": "NDA-210951-S010-LBL"
+    },
+    "staged_at": "2026-05-18T06:21:57Z",
+    "source_pdf_path": "apalutamide\\FDA\\SUPPL_010_210951s009s010lbl.pdf"
+  },
+  "suppl-011-210951orig1s011lbl-hybrid": {
+    "doc_filename": "SUPPL_011_210951Orig1s011lbl.pdf",
+    "agency": "FDA",
+    "sha256": "d488f937e80e4b55c4f850ff1fad890022ca0fbd39365ee861b48af43f518eea",
+    "classification": {
+      "source_agency": "FDA",
+      "review_type": "Labeling",
+      "substance_inn": "apalutamide",
+      "product_names": [
+        "Erleada"
+      ],
+      "document_id": "NDA-210951-S011-LBL"
+    },
+    "staged_at": "2026-05-18T06:21:57Z",
+    "source_pdf_path": "apalutamide\\FDA\\SUPPL_011_210951Orig1s011lbl.pdf"
+  },
+  "suppl-011-210951orig1s011ltr-hybrid": {
+    "doc_filename": "SUPPL_011_210951Orig1s011ltr.pdf",
+    "agency": "FDA",
+    "sha256": "1be48fba0b6186d67e6e197ac70d195b384a5f8107aa107330a6c161bc60a13e",
+    "classification": {
+      "source_agency": "FDA",
+      "review_type": "Approval Letter",
+      "substance_inn": "apalutamide",
+      "product_names": [
+        "Erleada"
+      ],
+      "document_id": "NDA-210951-S011-LTR"
+    },
+    "staged_at": "2026-05-18T06:21:57Z",
+    "source_pdf_path": "apalutamide\\FDA\\SUPPL_011_210951Orig1s011ltr.pdf"
+  },
+  "suppl-014-210951orig1s014ltr-hybrid": {
+    "doc_filename": "SUPPL_014_210951Orig1s014ltr.pdf",
+    "agency": "FDA",
+    "sha256": "2fe45e29f046272e72a48073a70b1a437a85935401c1fe15a9a6e4e86d296118",
+    "classification": {
+      "source_agency": "FDA",
+      "review_type": "Approval Letter",
+      "substance_inn": "apalutamide",
+      "product_names": [
+        "Erleada"
+      ],
+      "document_id": "NDA-210951-S014-LTR"
+    },
+    "staged_at": "2026-05-18T06:21:57Z",
+    "source_pdf_path": "apalutamide\\FDA\\SUPPL_014_210951Orig1s014ltr.pdf"
+  },
+  "suppl-014-210951s014lbl-hybrid": {
+    "doc_filename": "SUPPL_014_210951s014lbl.pdf",
+    "agency": "FDA",
+    "sha256": "4da50b874faab59a5de1cb4eab276d9f2e97b48502cfe9f3dc60e1c510af6b7a",
+    "classification": {
+      "source_agency": "FDA",
+      "review_type": "Labeling",
+      "substance_inn": "apalutamide",
+      "product_names": [
+        "Erleada"
+      ],
+      "document_id": "NDA-210951-S014-LBL"
+    },
+    "staged_at": "2026-05-18T06:21:57Z",
+    "source_pdf_path": "apalutamide\\FDA\\SUPPL_014_210951s014lbl.pdf"
+  },
+  "suppl-016-210951orig1s016ltr-hybrid": {
+    "doc_filename": "SUPPL_016_210951Orig1s016ltr.pdf",
+    "agency": "FDA",
+    "sha256": "96ae6f970c8577cec6dd61e58abd8ba2812a81d0829637711aaefb1d5aa76867",
+    "classification": {
+      "source_agency": "FDA",
+      "review_type": "Approval Letter",
+      "substance_inn": "apalutamide",
+      "product_names": [
+        "Erleada"
+      ],
+      "document_id": "NDA-210951-S016-LTR"
+    },
+    "staged_at": "2026-05-18T06:21:57Z",
+    "source_pdf_path": "apalutamide\\FDA\\SUPPL_016_210951Orig1s016ltr.pdf"
+  },
+  "suppl-016-210951s016lbl-hybrid": {
+    "doc_filename": "SUPPL_016_210951s016lbl.pdf",
+    "agency": "FDA",
+    "sha256": "82ebfd2e36fbb7d09f9bd6a2b41e1de0886d3ec91ce81d98a6a1e05295c1ca45",
+    "classification": {
+      "source_agency": "FDA",
+      "review_type": "Labeling",
+      "substance_inn": "apalutamide",
+      "product_names": [
+        "Erleada"
+      ],
+      "document_id": "NDA-210951-S016-LBL"
+    },
+    "staged_at": "2026-05-18T06:21:57Z",
+    "source_pdf_path": "apalutamide\\FDA\\SUPPL_016_210951s016lbl.pdf"
+  },
+  "suppl-017-210951orig1s017ltr-hybrid": {
+    "doc_filename": "SUPPL_017_210951Orig1s017ltr.pdf",
+    "agency": "FDA",
+    "sha256": "44d050b49aef6f5391a4a9d3f3d4cd74725e3e353d2c711326d610d25381f8f6",
+    "classification": {
+      "source_agency": "FDA",
+      "review_type": "Approval Letter",
+      "substance_inn": "apalutamide",
+      "product_names": [
+        "Erleada"
+      ],
+      "document_id": "NDA-210951-S017-LTR"
+    },
+    "staged_at": "2026-05-18T06:21:57Z",
+    "source_pdf_path": "apalutamide\\FDA\\SUPPL_017_210951Orig1s017ltr.pdf"
+  },
+  "suppl-017-210951s017lbl-hybrid": {
+    "doc_filename": "SUPPL_017_210951s017lbl.pdf",
+    "agency": "FDA",
+    "sha256": "5b0493e14d242f21f42998e45795d244301572b32109f37b6a425512ea592422",
+    "classification": {
+      "source_agency": "FDA",
+      "review_type": "Labeling",
+      "substance_inn": "apalutamide",
+      "product_names": [
+        "Erleada"
+      ],
+      "document_id": "NDA-210951-S017-LBL"
+    },
+    "staged_at": "2026-05-18T06:21:57Z",
+    "source_pdf_path": "apalutamide\\FDA\\SUPPL_017_210951s017lbl.pdf"
+  },
+  "suppl-021-210951orig1s021ltr-hybrid": {
+    "doc_filename": "SUPPL_021_210951Orig1s021ltr.pdf",
+    "agency": "FDA",
+    "sha256": "648537feb7c97b1319e87bed4164e84234364e03c51381b50da8cb5298296694",
+    "classification": {
+      "source_agency": "FDA",
+      "review_type": "Approval Letter",
+      "substance_inn": "apalutamide",
+      "product_names": [
+        "Erleada"
+      ],
+      "document_id": "NDA-210951-S021-LTR"
+    },
+    "staged_at": "2026-05-18T06:21:57Z",
+    "source_pdf_path": "apalutamide\\FDA\\SUPPL_021_210951Orig1s021ltr.pdf"
+  },
+  "suppl-021-210951s021lbl-hybrid": {
+    "doc_filename": "SUPPL_021_210951s021lbl.pdf",
+    "agency": "FDA",
+    "sha256": "c517ce3bcb3ac777b2556dad1dbcad35e84ce4ca7383261768c1e15038a8bba2",
+    "classification": {
+      "source_agency": "FDA",
+      "review_type": "Labeling",
+      "substance_inn": "apalutamide",
+      "product_names": [
+        "Erleada"
+      ],
+      "document_id": "NDA-210951-S021-LBL"
+    },
+    "staged_at": "2026-05-18T06:21:57Z",
+    "source_pdf_path": "apalutamide\\FDA\\SUPPL_021_210951s021lbl.pdf"
+  },
+  "product-monograph-erleada-hybrid": {
+    "doc_filename": "Product_Monograph_-_ERLEADA.pdf",
+    "agency": "HC",
+    "sha256": "b3e0d9d5f80447f946a5047480b5b491935aaa08490362757b61d123aed4a49a",
+    "classification": {
+      "source_agency": "HC",
+      "review_type": "Product Monograph",
+      "substance_inn": "apalutamide",
+      "product_names": [
+        "Erleada"
+      ],
+      "document_id": "HC-PM-Erleada"
+    },
+    "staged_at": "2026-05-18T06:21:57Z",
+    "source_pdf_path": "apalutamide\\HC\\Product_Monograph_-_ERLEADA.pdf"
+  },
+  "pmda-review-report-erleada-apalutamide-hybrid": {
+    "doc_filename": "PMDA_Review_Report_-_Erleada__Apalutamide_.pdf",
+    "agency": "PMDA",
+    "sha256": "62f6eb7723b43bf4b98f23b8599c687ea7ede53f960e20ef5cf3f455e78b3b8b",
+    "classification": {
+      "source_agency": "PMDA",
+      "review_type": "Review Report",
+      "substance_inn": "apalutamide",
+      "product_names": [
+        "Erleada"
+      ],
+      "document_id": "PMDA-RR-Erleada"
+    },
+    "staged_at": "2026-05-18T06:21:57Z",
+    "source_pdf_path": "apalutamide\\PMDA\\PMDA_Review_Report_-_Erleada__Apalutamide_.pdf"
+  },
+  "tga-auspar-auspar-apalutamide-hybrid": {
+    "doc_filename": "TGA_AusPAR_-_AusPAR__Apalutamide.pdf",
+    "agency": "TGA",
+    "sha256": "4c0edc6ee307a06604c434d711584ac1b02a872a20dbf28a14a64d8bb08014aa",
+    "classification": {
+      "source_agency": "TGA",
+      "review_type": "AusPAR",
+      "substance_inn": "apalutamide",
+      "product_names": [
+        "Erleada"
+      ],
+      "document_id": "TGA-AusPAR-Apalutamide"
+    },
+    "staged_at": "2026-05-18T06:21:57Z",
+    "source_pdf_path": "apalutamide\\TGA\\TGA_AusPAR_-_AusPAR__Apalutamide.pdf"
+  },
+  "tga-pi-auspar-apalutamide-hybrid": {
+    "doc_filename": "TGA_PI_-_AusPAR__Apalutamide.pdf",
+    "agency": "TGA",
+    "sha256": "29d115bcca45f80a1f880c406342d8660cc4dae1d20b0437531ef3cad5b0bead",
+    "classification": {
+      "source_agency": "TGA",
+      "review_type": "PI",
+      "substance_inn": "apalutamide",
+      "product_names": [
+        "Erleada"
+      ],
+      "document_id": "TGA-PI-Apalutamide"
+    },
+    "staged_at": "2026-05-18T06:21:57Z",
+    "source_pdf_path": "apalutamide\\TGA\\TGA_PI_-_AusPAR__Apalutamide.pdf"
+  }
+}
