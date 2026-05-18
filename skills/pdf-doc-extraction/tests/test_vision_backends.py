@@ -240,3 +240,135 @@ def test_hash_thresholds_exists_at_shared_level():
 
 def test_hash_thresholds_is_key_order_invariant():
     assert vb.hash_thresholds({"a": 1, "b": 2}) == vb.hash_thresholds({"b": 2, "a": 1})
+
+
+# --- Hard wall-clock timeout ---
+
+def test_compute_hard_timeout_returns_at_least_timeout_plus_60():
+    assert vb._compute_hard_timeout(10) >= 70
+    assert vb._compute_hard_timeout(60) >= 120
+    assert vb._compute_hard_timeout(180) >= 240
+
+
+def test_compute_hard_timeout_scales_above_50pct():
+    # For large timeouts, max(t+60, t*1.5+1) -> t*1.5+1
+    assert vb._compute_hard_timeout(180) == max(240, int(180 * 1.5) + 1)
+    assert vb._compute_hard_timeout(200) == int(200 * 1.5) + 1
+
+
+def test_with_hard_timeout_returns_value_on_normal_completion():
+    def quick():
+        return 42
+    assert vb._with_hard_timeout(quick, hard_timeout=5) == 42
+
+
+def test_with_hard_timeout_propagates_exceptions_from_inner_fn():
+    def boom():
+        raise ValueError("nope")
+    with pytest.raises(ValueError, match="nope"):
+        vb._with_hard_timeout(boom, hard_timeout=5)
+
+
+def test_with_hard_timeout_raises_504_on_overrun():
+    import time
+    import urllib.error
+
+    def slow():
+        time.sleep(2.0)
+        return "should not see"
+
+    with pytest.raises(urllib.error.HTTPError) as excinfo:
+        vb._with_hard_timeout(slow, hard_timeout=1, url_for_error="https://example/x")
+    assert excinfo.value.code == 504
+    assert "hard wall-clock timeout" in str(excinfo.value)
+
+
+def _hang_for(seconds: float):
+    """Mock side_effect that sleeps for `seconds`. Long enough to outlast a
+    test's hard_timeout patch (set to ~1s), short enough to keep tests fast."""
+    import time
+    def _fn(*args, **kwargs):
+        time.sleep(seconds)
+        raise AssertionError("unreachable: hard timeout should have fired")
+    return _fn
+
+
+def test_transcribe_gemini_raises_504_when_urlopen_hangs():
+    """The whole transcribe_gemini call must return in finite time even if
+    urllib.request.urlopen blocks indefinitely (the production bug)."""
+    import urllib.error
+    with patch.object(vb, "_compute_hard_timeout", return_value=1), \
+         patch("urllib.request.urlopen", side_effect=_hang_for(5)):
+        with pytest.raises(urllib.error.HTTPError) as excinfo:
+            vb.transcribe_gemini(
+                b"FAKE", api_key="K", model="gemma-4-31b-it", timeout=1, prompt="hi",
+            )
+    assert excinfo.value.code == 504
+
+
+def test_transcribe_gemini_structured_raises_504_when_urlopen_hangs():
+    import urllib.error
+    with patch.object(vb, "_compute_hard_timeout", return_value=1), \
+         patch("urllib.request.urlopen", side_effect=_hang_for(5)):
+        with pytest.raises(urllib.error.HTTPError) as excinfo:
+            vb.transcribe_gemini_structured(
+                b"FAKE", api_key="K", model="gemma-4-31b-it", timeout=1, prompt="hi",
+            )
+    assert excinfo.value.code == 504
+
+
+def test_transcribe_llama_cpp_raises_504_when_urlopen_hangs():
+    import urllib.error
+    with patch.object(vb, "_compute_hard_timeout", return_value=1), \
+         patch("urllib.request.urlopen", side_effect=_hang_for(5)):
+        with pytest.raises(urllib.error.HTTPError) as excinfo:
+            vb.transcribe_llama_cpp(
+                b"FAKE", host="http://localhost:8080", model="m", timeout=1, prompt="hi",
+            )
+    assert excinfo.value.code == 504
+
+
+def test_transcribe_llama_cpp_structured_raises_504_when_urlopen_hangs():
+    import urllib.error
+    with patch.object(vb, "_compute_hard_timeout", return_value=1), \
+         patch("urllib.request.urlopen", side_effect=_hang_for(5)):
+        with pytest.raises(urllib.error.HTTPError) as excinfo:
+            vb.transcribe_llama_cpp_structured(
+                b"FAKE", host="http://localhost:8080", model="m", timeout=1, prompt="hi",
+            )
+    assert excinfo.value.code == 504
+
+
+def test_504_from_hang_is_caught_by_gemini_round_robin_retry():
+    """The round-robin layer must advance past a hung pair to the next pair.
+    This is the production behavior we need: one hung Google endpoint must
+    not block the whole batch."""
+    import time
+    import urllib.error
+
+    call_count = {"n": 0}
+
+    def first_hangs_second_returns(req, timeout):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            time.sleep(60)  # first pair will hang
+            raise AssertionError("unreachable")
+        # Second pair returns normally
+        return _MockResponse({
+            "candidates": [{"content": {"parts": [{"text": "OK"}]}}]
+        })
+
+    # Use timeout=1 so the hard timeout is small (~61s in theory, but the
+    # mock _will_ sleep 60s; in practice the helper's hard_timeout for
+    # timeout=1 is max(61, 2) = 61, so the slow path still wins. Reduce by
+    # patching _compute_hard_timeout for this test to be deterministic.
+    with patch.object(vb, "_compute_hard_timeout", return_value=1):
+        with patch("urllib.request.urlopen", side_effect=first_hangs_second_returns):
+            result = vb._gemini_with_round_robin(
+                b"FAKE",
+                pairs=[("k1", "m1"), ("k2", "m2")],
+                timeout=1,
+                prompt="hi",
+            )
+    assert result == "OK"
+    assert call_count["n"] == 2

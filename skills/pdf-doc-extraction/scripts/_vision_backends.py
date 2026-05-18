@@ -11,8 +11,61 @@ import json
 import os
 import re
 import tempfile
+import threading
 import urllib.error
 import urllib.request
+
+
+def _compute_hard_timeout(timeout: int) -> int:
+    """Hard wall-clock timeout = max(timeout + 60, ceil(timeout * 1.5)).
+
+    The socket-level urllib timeout SHOULD catch hangs on its own, but in
+    practice (Windows + idle keep-alive HTTPS to Google) it doesn't always
+    fire — the call has been observed to block for hours past the requested
+    timeout. The hard wall-clock cap above guarantees the call returns in
+    finite time even if urllib's internal timeout doesn't trigger.
+    """
+    return max(timeout + 60, int(timeout * 1.5) + 1)
+
+
+def _with_hard_timeout(fn, *, hard_timeout: int, url_for_error: str = ""):
+    """Run `fn()` in a daemon thread; raise HTTPError(504) if it hangs.
+
+    The wrapped call runs in a daemon thread so the main thread can wait
+    on it with a finite deadline. On deadline overrun, we raise a synthetic
+    urllib.error.HTTPError with code 504 (Gateway Timeout), which the
+    round-robin retry layer treats as a transient failure and advances to
+    the next (api_key, model) pair.
+
+    The orphan thread is left to finish on its own — the underlying socket
+    eventually closes (OS keep-alive or remote FIN) or the process exits.
+    Daemon threads do not prevent process exit.
+    """
+    box: dict = {"value": None, "exc": None, "done": False}
+
+    def runner() -> None:
+        try:
+            box["value"] = fn()
+        except BaseException as e:  # noqa: BLE001 - we re-raise on the main thread
+            box["exc"] = e
+        finally:
+            box["done"] = True
+
+    t = threading.Thread(target=runner, daemon=True)
+    t.start()
+    t.join(hard_timeout)
+    if not box["done"]:
+        raise urllib.error.HTTPError(
+            url=url_for_error,
+            code=504,
+            msg=f"hard wall-clock timeout after {hard_timeout}s "
+                f"(urllib socket timeout did not fire)",
+            hdrs=None,  # type: ignore[arg-type]
+            fp=None,
+        )
+    if box["exc"] is not None:
+        raise box["exc"]
+    return box["value"]
 
 
 OCR_MODEL_PATTERN = re.compile(r"ocr", re.IGNORECASE)
@@ -132,14 +185,23 @@ def transcribe_llama_cpp(
         # pages and silently truncated mid-sentence.
         "max_tokens": 16384,
     }
+    url = f"{host.rstrip('/')}/v1/chat/completions"
     req = urllib.request.Request(
-        url=f"{host.rstrip('/')}/v1/chat/completions",
+        url=url,
         data=json.dumps(payload).encode("utf-8"),
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        body = json.loads(resp.read())
+
+    def _do() -> dict:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read())
+
+    body = _with_hard_timeout(
+        _do,
+        hard_timeout=_compute_hard_timeout(timeout),
+        url_for_error=url,
+    )
     return body["choices"][0]["message"]["content"].strip()
 
 
@@ -172,8 +234,16 @@ def transcribe_gemini(
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        body = json.loads(resp.read())
+
+    def _do() -> dict:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read())
+
+    body = _with_hard_timeout(
+        _do,
+        hard_timeout=_compute_hard_timeout(timeout),
+        url_for_error=url,
+    )
     out_parts = body["candidates"][0]["content"]["parts"]
     text = "".join(p.get("text", "") for p in out_parts if "text" in p)
     return text.strip()
@@ -240,14 +310,23 @@ def transcribe_llama_cpp_structured(
         "max_tokens": 8192,
         "response_format": {"type": "json_object"},
     }
+    url = f"{host.rstrip('/')}/v1/chat/completions"
     req = urllib.request.Request(
-        url=f"{host.rstrip('/')}/v1/chat/completions",
+        url=url,
         data=json.dumps(payload).encode("utf-8"),
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        body = json.loads(resp.read())
+
+    def _do() -> dict:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read())
+
+    body = _with_hard_timeout(
+        _do,
+        hard_timeout=_compute_hard_timeout(timeout),
+        url_for_error=url,
+    )
     raw_text = body["choices"][0]["message"]["content"]
     return _parse_structured_response(raw_text)
 
@@ -293,8 +372,16 @@ def transcribe_gemini_structured(
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        body = json.loads(resp.read())
+
+    def _do() -> dict:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read())
+
+    body = _with_hard_timeout(
+        _do,
+        hard_timeout=_compute_hard_timeout(timeout),
+        url_for_error=url,
+    )
     out_parts = body["candidates"][0]["content"]["parts"]
     raw_text = "".join(p.get("text", "") for p in out_parts if "text" in p)
     return _parse_structured_response(raw_text)
@@ -307,11 +394,18 @@ def _gemini_with_round_robin(
     timeout: int,
     prompt: str,
 ) -> str:
-    """Try each (api_key, model) pair in order. Advance on HTTP 429, raise otherwise.
+    """Try each (api_key, model) pair in order. Retry on transient failures.
 
-    Raises RuntimeError if every pair returns 429.
+    Advances to the next pair on HTTP 429 (rate limit) and HTTP 5xx
+    (transient server error or hard-timeout 504 emitted by the wall-clock
+    guard in transcribe_gemini). Non-transient HTTPErrors propagate.
+    Raises RuntimeError if every pair is exhausted, carrying the last error.
+
+    Local copies of this function exist in ocr_page.py and caption_figure.py
+    so that tests can patch.object cleanly without touching this module;
+    this version is the canonical reference implementation.
     """
-    last_429: Exception | None = None
+    last_err: Exception | None = None
     for api_key, model in pairs:
         try:
             return transcribe_gemini(
@@ -322,13 +416,13 @@ def _gemini_with_round_robin(
                 prompt=prompt,
             )
         except urllib.error.HTTPError as e:
-            if e.code == 429:
-                last_429 = e
+            if e.code == 429 or 500 <= e.code < 600:
+                last_err = e
                 continue
             raise
     raise RuntimeError(
-        f"all gemini (api_key, model) pairs returned 429 ({len(pairs)} tried)"
-    ) from last_429
+        f"all gemini (api_key, model) pairs exhausted ({len(pairs)} tried); last={last_err}"
+    ) from last_err
 
 
 def resolve_prompt(*, user_prompt: str | None, model: str) -> tuple[str, str]:
